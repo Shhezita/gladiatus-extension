@@ -1,0 +1,66 @@
+#glad-ah-sorter {
+  align-items: center;
+  background: #24180f;
+  border: 1px solid #7b5b32;
+  color: #f3ddb2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+  padding: 8px;
+}
+
+#glad-ah-sorter strong {
+  color: #ffd98a;
+  margin-right: 6px;
+}
+
+#glad-ah-sorter label {
+  color: #e9c98c;
+}
+
+#glad-ah-sorter select,
+#glad-ah-sorter button {
+  background: #3b2817;
+  border: 1px solid #9a713d;
+  color: #ffe6ae;
+  font: inherit;
+  min-height: 24px;
+  padding: 2px 7px;
+}
+
+#glad-ah-sorter button {
+  cursor: pointer;
+}
+
+#glad-ah-sorter button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+#glad-ah-sorter .glad-ah-count {
+  color: #c8aa74;
+  margin-left: auto;
+}
+
+.auction_item_div {
+  position: relative;
+}
+
+.glad-ah-score {
+  background: rgba(20, 13, 8, 0.88);
+  border: 1px solid #b98943;
+  color: #ffd98a;
+  font-size: 10px;
+  left: 0;
+  line-height: 1.2;
+  max-width: 130px;
+  overflow: hidden;
+  padding: 2px 4px;
+  pointer-events: none;
+  position: absolute;
+  text-overflow: ellipsis;
+  top: 0;
+  white-space: nowrap;
+  z-index: 20;
+}
