@@ -30,13 +30,13 @@ This repo is a local Chrome MV3 extension for improving Gladiatus auction and ar
 - `auction-schema.js` owns stable contracts: storage keys, stat keys/labels/order, auction category ids, and group/view mapping.
 - `auction-core.js` owns website-facing logic: tooltip parsing, stat extraction, auction document loading, and scan orchestration. It exposes `window.GladiatusAuctionCore`.
 - `auction-model.js` owns scoring/filtering rules and custom definition normalization/evaluation. Add score presets and filter controls here, not in UI files.
-- `content.js` owns the injected auction-page sorter, storage syncing, and the bridge from isolated content script to page-world core APIs.
-- `popup.js`, `popup.html`, and `popup.css` own the extension popup UI, cached scan browsing, and custom filter manager.
+- `auction-content.js` owns the injected auction-page sorter, storage syncing, and the bridge from isolated content script to page-world core APIs.
+- `popup.js`, `popup/*.js`, `popup.html`, and `popup.css` own the extension popup UI, cached scan browsing, and custom filter manager.
 - `arena-core.js` owns arena opponent/profile parsing and `ArenaCharacter` scoring helpers.
 - `arena-content.js` owns arena-page opponent scanning and row annotations.
 - `background.js` owns cross-origin Gladiatus profile HTML fetches for arena scans. It should stay a narrow fetch bridge, not a parser.
 - `styles.css` is only for injected page UI.
-- `manifest.json` loads `auction-schema.js` and `auction-core.js` in the MAIN world, then loads schema/model/core/content plus arena modules in the isolated content-script world.
+- `manifest.json` loads `auction-schema.js` and `auction-core.js` in the MAIN world, then loads one deterministic isolated content-script entry with shared dependencies followed by auction (`auction-content.js`) and arena (`arena-content.js`) bootstraps. Both bootstraps match Gladiatus game pages and gate themselves by `mod`.
 
 ## Design Principles
 
@@ -52,7 +52,7 @@ This repo is a local Chrome MV3 extension for improving Gladiatus auction and ar
 Run these after changes:
 
 ```sh
-for file in auction-schema.js auction-core.js auction-model.js arena-core.js content.js arena-content.js background.js popup.js architecture.test.js; do node --check "$file"; done
+for file in auction-schema.js score-model.js auction-core.js auction-model.js auction-content.js arena-core.js arena-content.js background.js popup.js popup/*.js architecture.test.js; do node --check "$file"; done
 node architecture.test.js
 node -e "JSON.parse(require('fs').readFileSync('manifest.json','utf8')); console.log('manifest ok')"
 git diff --check

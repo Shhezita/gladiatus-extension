@@ -1,7 +1,10 @@
 (() => {
   const ARENA = window.GladiatusArenaCore;
+  if (!isArenaPageUrl(window.location.href)) return;
+
   if (!ARENA) {
-    throw new Error("Gladiatus arena core must load before the arena content script.");
+    registerMissingArenaDependencyDiagnostic();
+    return;
   }
 
   const PANEL_ID = "glad-arena-scanner";
@@ -11,6 +14,30 @@
   let arenaFormulas = [ARENA.defaultArenaFormula()];
   let selectedFormulaId = "";
   let bootTimer = 0;
+
+  function isArenaPageUrl(url) {
+    try {
+      const parsed = new URL(url);
+      return parsed.hostname.endsWith(".gladiatus.gameforge.com")
+        && parsed.pathname.endsWith("/game/index.php")
+        && parsed.searchParams.get("mod") === "arena";
+    } catch {
+      return false;
+    }
+  }
+
+  function registerMissingArenaDependencyDiagnostic() {
+    const error = "Arena content script dependency missing: arena-core.js. Reload the unpacked extension and refresh this arena tab.";
+    console.error(error);
+
+    if (typeof chrome === "undefined" || !chrome.runtime?.onMessage) return;
+
+    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+      if (message?.type !== "GLAD_ARENA_SCAN_OPPONENTS") return false;
+      sendResponse({ ok: false, error });
+      return false;
+    });
+  }
 
   if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

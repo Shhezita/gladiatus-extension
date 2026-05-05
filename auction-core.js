@@ -2,6 +2,7 @@
   const root = typeof globalThis !== "undefined" ? globalThis : window;
   const SCHEMA = root.GladiatusAuctionSchema;
   if (!SCHEMA) {
+    if (!isAuctionPageUrl(root.document?.location?.href || root.location?.href || "")) return;
     throw new Error("GladiatusAuctionSchema must load before GladiatusAuctionCore.");
   }
 
@@ -19,8 +20,15 @@
 
   // Page and tooltip parsing
   function isAuctionPage(doc = document) {
+    return isAuctionPageUrl(doc.location?.href || window.location.href);
+  }
+
+  function isAuctionPageUrl(url) {
     try {
-      return new URL(doc.location?.href || window.location.href).searchParams.get("mod") === "auction";
+      const parsed = new URL(url);
+      return parsed.hostname.endsWith(".gladiatus.gameforge.com")
+        && parsed.pathname.endsWith("/game/index.php")
+        && parsed.searchParams.get("mod") === "auction";
     } catch {
       return false;
     }

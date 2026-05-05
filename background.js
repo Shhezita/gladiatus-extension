@@ -1,4 +1,12 @@
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "GLAD_AH_REPAIR_AUCTION_CONTENT") {
+    repairAuctionContent(_sender)
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+
+    return true;
+  }
+
   if (message?.type !== "GLAD_ARENA_FETCH_PROFILE") return false;
 
   fetchProfileHtml(message.url)
@@ -8,7 +16,27 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return true;
 });
 
+const AUCTION_CONTENT_FILES = [
+  "auction-schema.js",
+  "score-model.js",
+  "auction-model.js",
+  "auction-core.js",
+  "arena-core.js",
+  "auction-content.js",
+  "arena-content.js"
+];
 const RETRYABLE_PROFILE_STATUSES = new Set([429, 500, 502, 503, 504]);
+
+async function repairAuctionContent(sender) {
+  const tabId = sender?.tab?.id;
+  if (!tabId) throw new Error("Cannot repair auction content without a sender tab.");
+  if (!chrome.scripting?.executeScript) throw new Error("chrome.scripting is not available.");
+
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: AUCTION_CONTENT_FILES
+  });
+}
 
 async function fetchProfileHtml(rawUrl) {
   const url = normalizeProfileUrl(rawUrl);

@@ -2,6 +2,7 @@
   const root = typeof globalThis !== "undefined" ? globalThis : window;
   const SCORE = root.GladiatusScoreModel;
   if (!SCORE) {
+    if (!isArenaPageUrl(root.document?.location?.href || root.location?.href || "")) return;
     throw new Error("GladiatusScoreModel must load before GladiatusArenaCore.");
   }
 

@@ -1,19 +1,36 @@
 (() => {
+  const CONTENT_VERSION = "auction-content-split-v2";
   const UI_ID = "glad-ah-sorter";
   const BADGE_CLASS = "glad-ah-score";
   const CARD_SELECTOR = "form[id^='auctionForm']";
-  const SCHEMA = window.GladiatusAuctionSchema;
-  const MODEL = window.GladiatusAuctionModel;
-  const CORE = window.GladiatusAuctionCore;
-  if (!SCHEMA || !MODEL || !CORE) {
-    if (!isAuctionPageUrl(window.location.href)) return;
-    throw new Error("Gladiatus auction schema, model, and core must load before the content script.");
+  const MESSAGE_TYPES = {
+    applySort: new Set(["GLAD_AH_APPLY_SORT", "GLAD_AH_APPLY_SORT_V2"]),
+    boot: new Set(["GLAD_AH_BOOT", "GLAD_AH_BOOT_V2"]),
+    customDefinitionsUpdated: new Set(["GLAD_AH_CUSTOM_DEFINITIONS_UPDATED", "GLAD_AH_CUSTOM_DEFINITIONS_UPDATED_V2"]),
+    repair: new Set(["GLAD_AH_REPAIR_AUCTION_CONTENT"]),
+    scanAll: new Set(["GLAD_AH_SCAN_ALL", "GLAD_AH_SCAN_ALL_V2"])
+  };
+
+  if (!isAuctionPageUrl(window.location.href)) return;
+
+  const missingDependencies = getMissingDependencies();
+  if (missingDependencies.length) {
+    registerMissingDependencyDiagnostics(missingDependencies);
+    requestDependencyRepair(missingDependencies);
+    return;
   }
-  if (window.__GladiatusAuctionContentLoaded && typeof window.__GladiatusAuctionBoot === "function") {
+  clearMissingDependencyDiagnostics();
+
+  const { SCHEMA, MODEL, CORE } = getDependencies();
+
+  if (window.__GladiatusAuctionContentLoaded
+    && window.__GladiatusAuctionContentVersion === CONTENT_VERSION
+    && typeof window.__GladiatusAuctionBoot === "function") {
     window.__GladiatusAuctionBoot();
     return;
   }
   window.__GladiatusAuctionContentLoaded = true;
+  window.__GladiatusAuctionContentVersion = CONTENT_VERSION;
 
   function isAuctionPageUrl(url) {
     try {
@@ -24,6 +41,82 @@
     } catch {
       return false;
     }
+  }
+
+  function getMissingDependencies() {
+    const dependencies = getDependencies();
+    const missing = [];
+    if (!dependencies.SCHEMA) missing.push("auction-schema.js");
+    if (!dependencies.SCORE) missing.push("score-model.js");
+    if (!dependencies.MODEL) missing.push("auction-model.js");
+    if (!dependencies.CORE) missing.push("auction-core.js");
+    return missing;
+  }
+
+  function getDependencies() {
+    return {
+      SCHEMA: window.GladiatusAuctionSchema,
+      SCORE: window.GladiatusScoreModel,
+      MODEL: window.GladiatusAuctionModel,
+      CORE: window.GladiatusAuctionCore
+    };
+  }
+
+  function registerMissingDependencyDiagnostics(missing) {
+    if (typeof chrome === "undefined" || !chrome.runtime?.onMessage) return;
+    if (window.__GladiatusAuctionMissingDependencyListener) return;
+
+    const listener = (message, _sender, sendResponse) => {
+      if (!isAuctionMessage(message)) return false;
+      const nextMissing = getMissingDependencies();
+      if (!nextMissing.length) {
+        clearMissingDependencyDiagnostics();
+        return false;
+      }
+
+      sendResponse({ ok: false, error: formatMissingDependencyError(nextMissing) });
+      return false;
+    };
+    window.__GladiatusAuctionMissingDependencyListener = listener;
+    chrome.runtime.onMessage.addListener(listener);
+  }
+
+  function requestDependencyRepair(missing) {
+    if (window.__GladiatusAuctionRepairRequested) return;
+    if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) return;
+
+    window.__GladiatusAuctionRepairRequested = true;
+    chrome.runtime.sendMessage({
+      type: "GLAD_AH_REPAIR_AUCTION_CONTENT",
+      missing
+    }, () => {
+      if (chrome.runtime.lastError) {
+        window.__GladiatusAuctionRepairRequested = false;
+      }
+    });
+  }
+
+  function clearMissingDependencyDiagnostics() {
+    const listener = window.__GladiatusAuctionMissingDependencyListener;
+    if (!listener || typeof chrome === "undefined" || !chrome.runtime?.onMessage) return;
+    chrome.runtime.onMessage.removeListener(listener);
+    delete window.__GladiatusAuctionMissingDependencyListener;
+    delete window.__GladiatusAuctionRepairRequested;
+  }
+
+  function isAuctionMessage(message) {
+    return isMessageType(message, MESSAGE_TYPES.boot)
+      || isMessageType(message, MESSAGE_TYPES.scanAll)
+      || isMessageType(message, MESSAGE_TYPES.applySort)
+      || isMessageType(message, MESSAGE_TYPES.customDefinitionsUpdated);
+  }
+
+  function isMessageType(message, types) {
+    return types.has(message?.type);
+  }
+
+  function formatMissingDependencyError(missing) {
+    return `Auction content script dependencies missing: ${missing.join(", ")}. Reload the unpacked extension and refresh this auction tab.`;
   }
 
   const BASE_SORT_OPTIONS = [
@@ -292,6 +385,11 @@
   function getAuctionTable() {
     const firstForm = document.querySelector(CARD_SELECTOR);
     return firstForm ? firstForm.closest("table") : null;
+  }
+
+  function getAuctionFilterForm() {
+    return Array.from(document.querySelectorAll("#content form, form"))
+      .find((form) => form.querySelector("select[name='itemType']")) || null;
   }
 
   function getCurrentCategoryMeta() {
@@ -605,7 +703,8 @@
     if (!isAuctionPage() || document.getElementById(UI_ID)) return;
 
     const table = getAuctionTable();
-    if (!table) return;
+    const anchor = table || getAuctionFilterForm() || document.querySelector("#content");
+    if (!anchor) return;
 
     const panel = document.createElement("div");
     panel.id = UI_ID;
@@ -640,12 +739,12 @@
     count.textContent = `${collectItems().length} items`;
 
     panel.append(title, label, select, orderButton, filterControls, applyButton, count);
-    insertPanel(panel, table);
+    insertPanel(panel, table, anchor);
     updateOrderButton();
     sortItems();
   }
 
-  function insertPanel(panel, table) {
+  function insertPanel(panel, table, anchor) {
     const compareHeader = Array.from(document.querySelectorAll("#content h2"))
       .find((heading) => heading.textContent.trim() === "Compare with");
 
@@ -660,15 +759,17 @@
       return;
     }
 
-    table.before(panel);
+    if (anchor.tagName === "FORM") {
+      anchor.after(panel);
+      return;
+    }
+
+    anchor.prepend(panel);
   }
 
   function boot() {
     window.clearTimeout(bootTimer);
     bootTimer = window.setTimeout(() => {
-      if (isAuctionPage()) {
-        ensurePageCoreInjected().catch(() => {});
-      }
       ensureUi();
     }, 100);
   }
@@ -729,7 +830,7 @@
 
   if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-      if (message?.type === "GLAD_AH_APPLY_SORT") {
+      if (isMessageType(message, MESSAGE_TYPES.applySort)) {
         const option = getSortOptions().find((candidate) => candidate.id === message.sortId && isSortOptionVisibleForCurrentView(candidate));
         if (!option) {
           sendResponse({ ok: false, error: "Unknown auction sort preset." });
@@ -746,7 +847,7 @@
         return false;
       }
 
-      if (message?.type === "GLAD_AH_CUSTOM_DEFINITIONS_UPDATED") {
+      if (isMessageType(message, MESSAGE_TYPES.customDefinitionsUpdated)) {
         customDefinitions = MODEL.normalizeCustomDefinitions(message.definitions);
         refreshStateFromStorage();
         renderSortSelectOptions();
@@ -758,7 +859,19 @@
         return false;
       }
 
-      if (message?.type !== "GLAD_AH_SCAN_ALL") return false;
+      if (isMessageType(message, MESSAGE_TYPES.boot)) {
+        boot();
+        sendResponse({
+          ok: true,
+          isAuctionPage: isAuctionPage(),
+          hasPanel: Boolean(document.getElementById(UI_ID)),
+          itemForms: document.querySelectorAll(CARD_SELECTOR).length,
+          hasFilterForm: Boolean(getAuctionFilterForm())
+        });
+        return false;
+      }
+
+      if (!isMessageType(message, MESSAGE_TYPES.scanAll)) return false;
 
       callPageCore("scanAllAuctionItems")
         .then((result) => sendResponse({ ok: true, result }))

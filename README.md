@@ -60,13 +60,13 @@ The popup uses the same page-level API through a content-script bridge. The sche
 ## Architecture Checks
 
 ```sh
-for file in auction-schema.js auction-core.js auction-model.js arena-core.js content.js arena-content.js background.js popup.js architecture.test.js; do node --check "$file"; done
+for file in auction-schema.js score-model.js auction-core.js auction-model.js auction-content.js arena-core.js arena-content.js background.js popup.js popup/*.js architecture.test.js; do node --check "$file"; done
 node architecture.test.js
 ```
 
 ## Adding Presets And Filters
 
-Auction groups, score formulas, and filters are isolated in `auction-model.js`. Stable stat/category/storage contracts are isolated in `auction-schema.js`. The popup and content script consume those definitions instead of duplicating formulas.
+Auction groups, score formulas, and filters are isolated in `auction-model.js`. Stable stat/category/storage contracts are isolated in `auction-schema.js`. The popup and auction content script consume those definitions instead of duplicating formulas.
 
 Custom filters created in the popup use this shape:
 

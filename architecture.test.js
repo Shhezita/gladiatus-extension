@@ -88,7 +88,211 @@ function loadGlobals() {
   };
 }
 
+function makeAuctionContentContext(listeners) {
+  const context = {
+    console: { ...console, error() {}, warn() {} },
+    URL,
+    clearTimeout() {},
+    setTimeout(callback) {
+      callback();
+      return 1;
+    },
+    chrome: {
+      runtime: {
+        id: "test-extension",
+        getURL(file) {
+          return file;
+        },
+        onMessage: {
+          addListener(listener) {
+            listeners.push(listener);
+          },
+          removeListener(listener) {
+            const index = listeners.indexOf(listener);
+            if (index !== -1) listeners.splice(index, 1);
+          }
+        }
+      },
+      storage: {
+        local: {
+          async get() {
+            return {};
+          },
+          async set() {}
+        },
+        onChanged: {
+          addListener() {}
+        }
+      }
+    },
+    document: makeContentDocument(),
+    location: { href: "https://s1.gladiatus.gameforge.com/game/index.php?mod=auction&itemType=2" },
+    localStorage: {
+      getItem() {
+        return null;
+      },
+      setItem() {}
+    },
+    MutationObserver: class {
+      constructor(callback) {
+        this.callback = callback;
+      }
+      observe() {}
+    }
+  };
+  context.window = context;
+  context.globalThis = context;
+  vm.createContext(context);
+  return context;
+}
+
+function makeContentDocument() {
+  const documentElement = makeElement("html");
+  const head = makeElement("head");
+  return {
+    currentScript: null,
+    documentElement,
+    head,
+    readyState: "complete",
+    location: { href: "https://s1.gladiatus.gameforge.com/game/index.php?mod=auction&itemType=2" },
+    addEventListener() {},
+    createDocumentFragment() {
+      return makeElement("#fragment");
+    },
+    createElement: makeElement,
+    getElementById() {
+      return null;
+    },
+    querySelector() {
+      return null;
+    },
+    querySelectorAll() {
+      return [];
+    }
+  };
+}
+
+function makeElement(tagName) {
+  return {
+    tagName: String(tagName || "").toUpperCase(),
+    className: "",
+    dataset: {},
+    disabled: false,
+    hidden: false,
+    id: "",
+    style: {
+      setProperty() {}
+    },
+    tBodies: [],
+    append() {},
+    appendChild() {},
+    prepend() {},
+    before() {},
+    after() {},
+    remove() {},
+    replaceChildren() {},
+    addEventListener() {},
+    classList: {
+      add() {},
+      remove() {},
+      toggle() {},
+      contains() {
+        return false;
+      }
+    },
+    closest() {
+      return null;
+    },
+    querySelector() {
+      return null;
+    },
+    querySelectorAll() {
+      return [];
+    },
+    set textContent(value) {
+      this._textContent = String(value || "");
+    },
+    get textContent() {
+      return this._textContent || "";
+    },
+    set innerHTML(value) {
+      this._innerHTML = String(value || "");
+      this._textContent = this._innerHTML.replace(/<[^>]+>/g, "");
+    },
+    get innerHTML() {
+      return this._innerHTML || "";
+    },
+    get innerText() {
+      return this.textContent;
+    }
+  };
+}
+
 const { schema, score, model, core, arena } = loadGlobals();
+
+{
+  const manifest = JSON.parse(fs.readFileSync(path.join(rootDir, "manifest.json"), "utf8"));
+  const mainEntry = manifest.content_scripts.find((entry) => entry.world === "MAIN");
+  const isolatedEntries = manifest.content_scripts.filter((entry) => entry.world !== "MAIN");
+
+  assert.deepEqual(mainEntry.js, ["auction-schema.js", "auction-core.js"]);
+  assert.equal(isolatedEntries.length, 1);
+  assert.deepEqual(isolatedEntries[0].js, [
+    "auction-schema.js",
+    "score-model.js",
+    "auction-model.js",
+    "auction-core.js",
+    "arena-core.js",
+    "auction-content.js",
+    "arena-content.js"
+  ]);
+  assert.equal(fs.existsSync(path.join(rootDir, "content.js")), false);
+
+  const referencedFiles = [
+    ...manifest.content_scripts.flatMap((entry) => [...(entry.js || []), ...(entry.css || [])]),
+    ...manifest.web_accessible_resources.flatMap((entry) => entry.resources || []),
+    "popup.js",
+    "popup/runtime.js",
+    "popup/store.js",
+    "popup/auction-view.js",
+    "popup/arena-view.js"
+  ];
+  for (const file of referencedFiles) {
+    assert.equal(fs.existsSync(path.join(rootDir, file)), true, `${file} is referenced but missing`);
+  }
+
+  const popupHtml = fs.readFileSync(path.join(rootDir, "popup.html"), "utf8");
+  assert.match(popupHtml, /<script\s+type="module"\s+src="popup\.js"><\/script>/);
+}
+
+{
+  const listeners = [];
+  const context = makeAuctionContentContext(listeners);
+  vm.runInContext(fs.readFileSync(path.join(rootDir, "auction-content.js"), "utf8"), context, { filename: "auction-content.js" });
+
+  assert.equal(typeof context.__GladiatusAuctionMissingDependencyListener, "function");
+  assert.equal(listeners.length, 1);
+
+  for (const file of ["auction-schema.js", "score-model.js", "auction-model.js", "auction-core.js"]) {
+    vm.runInContext(fs.readFileSync(path.join(rootDir, file), "utf8"), context, { filename: file });
+  }
+  vm.runInContext(fs.readFileSync(path.join(rootDir, "auction-content.js"), "utf8"), context, { filename: "auction-content.js" });
+
+  assert.equal(context.__GladiatusAuctionMissingDependencyListener, undefined);
+  assert.equal(listeners.length, 1);
+
+  const responses = [];
+  for (const listener of listeners) {
+    listener({ type: "GLAD_AH_BOOT_V2" }, null, (response) => responses.push(response));
+  }
+  assert.deepEqual(JSON.parse(JSON.stringify(responses)), [{
+    ok: true,
+    isAuctionPage: true,
+    hasPanel: false,
+    itemForms: 0,
+    hasFilterForm: false
+  }]);
+}
 
 {
   const parsed = core.parseStats([
