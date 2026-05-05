@@ -17,6 +17,14 @@ It does not bid, buy, call extra APIs, or send data anywhere.
 ## Notes
 
 - Sorting affects only the currently visible auction page.
-- Use the game filter first for item type, level, and quality, then sort the visible results by Strength, Dexterity, Agility, Constitution, Charisma, Intelligence, Health, Armour, damage, and related values.
+- Use the game filter first for item type, level, and quality, then sort the visible results by Strength, Dexterity, Agility, Constitution, Charisma, Intelligence, Life points, Health, Armour, Damage bonus, weapon damage, Block value, Healing, Threat, and related values.
 - `High first` is the default for stats. `Immediate gold` defaults to low first.
 - If you change files while the extension is already loaded, click the extension reload button on `chrome://extensions`, then refresh the Gladiatus page.
+
+## Parsed Tooltip Formats
+
+- Equippable weapons: `Damage 56 - 71` and compound durability lines like `Damage 56 - 71,+7 - 9`.
+- Non-weapon equipment: flat damage lines like `Damage +7`, `Damage +5,0`, and `Damage +8,+1`.
+- Upgrades: usage lines like `Using: +10 Damage` or `Using: +6 Charisma`.
+- Mercenary contracts: absolute stat lines like `Life points: 2130` and `Strength: 98`.
+- Mercenary equipment: regular equipment stats plus fields like `Threat`, `Block value`, `Healing`, and critical values.

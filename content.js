@@ -9,13 +9,17 @@
     "Constitution",
     "Charisma",
     "Intelligence",
+    "Life points",
+    "Damage",
     "Health",
     "Armour",
     "Block value",
     "Healing",
     "Critical attack value",
     "Critical healing value",
-    "Critical damage"
+    "Critical damage",
+    "Threat",
+    "Hardening value"
   ];
   const PRIMARY_STATS = [
     "strength",
@@ -34,6 +38,8 @@
     { id: "constitution", label: "Constitution", get: (item) => item.stats.constitution || 0 },
     { id: "charisma", label: "Charisma", get: (item) => item.stats.charisma || 0 },
     { id: "intelligence", label: "Intelligence", get: (item) => item.stats.intelligence || 0 },
+    { id: "lifepoints", label: "Life points", get: (item) => item.stats.lifepoints || 0 },
+    { id: "damageBonus", label: "Damage bonus", get: (item) => item.stats.damageBonus || 0 },
     { id: "health", label: "Health", get: (item) => item.stats.health || 0 },
     { id: "armour", label: "Armour", get: (item) => item.stats.armour || 0 },
     { id: "blockvalue", label: "Block value", get: (item) => item.stats.blockvalue || 0 },
@@ -41,6 +47,8 @@
     { id: "criticalattackvalue", label: "Critical attack", get: (item) => item.stats.criticalattackvalue || 0 },
     { id: "criticalhealingvalue", label: "Critical healing", get: (item) => item.stats.criticalhealingvalue || 0 },
     { id: "criticaldamage", label: "Critical damage", get: (item) => item.stats.criticaldamage || 0 },
+    { id: "threat", label: "Threat", get: (item) => item.stats.threat || 0 },
+    { id: "hardeningvalue", label: "Hardening", get: (item) => item.stats.hardeningvalue || 0 },
     { id: "damageAvg", label: "Damage average", get: (item) => item.stats.damageAvg || 0 },
     { id: "damageMax", label: "Damage max", get: (item) => item.stats.damageMax || 0 },
     { id: "level", label: "Level", get: (item) => item.level || 0 },
@@ -83,13 +91,27 @@
   }
 
   function parseSignedBonus(line) {
-    const parenthesized = line.match(/\(([+-]?\d+)\)/);
-    if (parenthesized) {
-      return Number.parseInt(parenthesized[1], 10) || 0;
+    const parenthesized = Array.from(line.matchAll(/\(([+-]?\d+)\)/g));
+    if (parenthesized.length) {
+      return parenthesized.reduce((total, match) => total + (Number.parseInt(match[1], 10) || 0), 0);
     }
 
-    const direct = line.match(/[+-]\d+/);
-    return direct ? Number.parseInt(direct[0], 10) || 0 : 0;
+    const directValues = Array.from(line.matchAll(/[+-]\d+/g));
+    return directValues.reduce((total, match) => total + (Number.parseInt(match[0], 10) || 0), 0);
+  }
+
+  function parseDamageRange(line) {
+    const ranges = Array.from(line.matchAll(/([+-]?\d+)\s*-\s*([+-]?\d+)/g));
+    if (!ranges.length) return null;
+
+    return ranges.reduce(
+      (total, match) => {
+        total.min += Number.parseInt(match[1], 10) || 0;
+        total.max += Number.parseInt(match[2], 10) || 0;
+        return total;
+      },
+      { min: 0, max: 0 }
+    );
   }
 
   function parseTooltipLines(icon) {
@@ -113,13 +135,22 @@
     let itemValue = 0;
 
     for (const line of lines) {
-      const damage = line.match(/^Damage\s+(\d+)\s*-\s*(\d+)/i);
-      if (damage) {
-        const min = Number.parseInt(damage[1], 10) || 0;
-        const max = Number.parseInt(damage[2], 10) || 0;
-        stats.damageMin = min;
-        stats.damageMax = max;
-        stats.damageAvg = (min + max) / 2;
+      const damageRange = line.match(/^Damage\s+(.+)/i);
+      if (damageRange) {
+        const range = parseDamageRange(damageRange[1]);
+        if (range) {
+          stats.damageMin = range.min;
+          stats.damageMax = range.max;
+          stats.damageAvg = (range.min + range.max) / 2;
+        } else {
+          stats.damageBonus = (stats.damageBonus || 0) + parseSignedBonus(damageRange[1]);
+        }
+        continue;
+      }
+
+      const usingBonus = line.match(/^Using:\s+(.+)$/i);
+      if (usingBonus) {
+        parseUsingBonus(usingBonus[1], stats);
         continue;
       }
 
@@ -136,16 +167,36 @@
       }
 
       for (const statName of STAT_NAMES) {
-        const statPattern = new RegExp(`^${escapeRegExp(statName)}\\b`, "i");
+        const statPattern = new RegExp(`^${escapeRegExp(statName)}\\b\\s*:?`, "i");
         if (statPattern.test(line)) {
           const key = keyForStat(statName);
-          stats[key] = (stats[key] || 0) + parseSignedBonus(line);
+          stats[key] = (stats[key] || 0) + parseStatValue(statName, line);
           break;
         }
       }
     }
 
     return { stats, level, itemValue };
+  }
+
+  function parseStatValue(statName, line) {
+    const absolute = line.match(new RegExp(`^${escapeRegExp(statName)}\\s*:\\s*([+-]?\\d+)`, "i"));
+    if (absolute) {
+      return Number.parseInt(absolute[1], 10) || 0;
+    }
+
+    return parseSignedBonus(line);
+  }
+
+  function parseUsingBonus(text, stats) {
+    for (const statName of STAT_NAMES) {
+      const statPattern = new RegExp(`\\b${escapeRegExp(statName)}\\b`, "i");
+      if (!statPattern.test(text)) continue;
+
+      const key = statName.toLowerCase() === "damage" ? "damageBonus" : keyForStat(statName);
+      stats[key] = (stats[key] || 0) + parseSignedBonus(text);
+      return;
+    }
   }
 
   function escapeRegExp(value) {
