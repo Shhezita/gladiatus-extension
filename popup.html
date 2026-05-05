@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Gladiatus Auction Scanner</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <header>
+      <h1>Auction scanner</h1>
+      <button id="scan-button" type="button">Scan auction</button>
+    </header>
+
+    <p id="status">Open a Gladiatus auction page, then scan.</p>
+
+    <section id="summary" hidden></section>
+    <nav id="tabs" class="tabs" hidden></nav>
+    <section id="controls" class="controls" hidden></section>
+    <section id="results" class="results"></section>
+
+    <script src="auction-model.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

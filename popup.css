@@ -1,0 +1,166 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: #17120d;
+  color: #ead8b5;
+  font: 12px/1.4 Arial, sans-serif;
+  margin: 0;
+  max-height: 600px;
+  min-width: 680px;
+  width: 680px;
+}
+
+header {
+  align-items: center;
+  background: #24180f;
+  border-bottom: 1px solid #60451f;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 10px 12px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+h1 {
+  color: #ffd98a;
+  font-size: 15px;
+  font-weight: 700;
+  margin: 0;
+}
+
+button {
+  background: #4a321b;
+  border: 1px solid #a67938;
+  color: #ffe3a5;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  min-height: 28px;
+  padding: 4px 10px;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+#status {
+  border-bottom: 1px solid #332416;
+  color: #cbb58c;
+  margin: 0;
+  padding: 8px 12px;
+}
+
+#summary {
+  background: #20170f;
+  border-bottom: 1px solid #332416;
+  color: #d8c294;
+  padding: 8px 12px;
+}
+
+.tabs {
+  background: #1d150f;
+  border-bottom: 1px solid #332416;
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 8px;
+}
+
+.tabs button,
+.controls button {
+  background: #302214;
+  border-color: #60451f;
+  color: #d8c294;
+  min-height: 26px;
+  white-space: nowrap;
+}
+
+.tabs button.active,
+.controls button.active {
+  background: #755024;
+  border-color: #d8a14d;
+  color: #fff1c4;
+}
+
+.controls {
+  align-items: center;
+  background: #17120d;
+  border-bottom: 1px solid #332416;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px;
+}
+
+.control-label {
+  color: #c8aa74;
+  font-weight: 700;
+  margin-right: 2px;
+}
+
+.results {
+  max-height: 420px;
+  overflow: auto;
+  padding: 8px;
+}
+
+.item {
+  align-items: flex-start;
+  background: #201811;
+  border: 1px solid #43301c;
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+  padding: 7px;
+}
+
+.item-thumb {
+  align-items: center;
+  background: #120d09;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  border: 1px solid #5a3f23;
+  color: #8f7650;
+  display: flex;
+  flex: 0 0 42px;
+  font-size: 16px;
+  font-weight: 700;
+  height: 42px;
+  justify-content: center;
+}
+
+.item-detail {
+  min-width: 0;
+}
+
+.item-name {
+  color: #f4dfa8;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.meta {
+  color: #a8926a;
+  margin-bottom: 4px;
+}
+
+.score {
+  color: #ffd98a;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.stats {
+  color: #d7c4a0;
+}
+
+.empty {
+  color: #9d8a68;
+  padding: 12px;
+}
