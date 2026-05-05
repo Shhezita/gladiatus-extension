@@ -6,7 +6,24 @@
   const MODEL = window.GladiatusAuctionModel;
   const CORE = window.GladiatusAuctionCore;
   if (!SCHEMA || !MODEL || !CORE) {
+    if (!isAuctionPageUrl(window.location.href)) return;
     throw new Error("Gladiatus auction schema, model, and core must load before the content script.");
+  }
+  if (window.__GladiatusAuctionContentLoaded && typeof window.__GladiatusAuctionBoot === "function") {
+    window.__GladiatusAuctionBoot();
+    return;
+  }
+  window.__GladiatusAuctionContentLoaded = true;
+
+  function isAuctionPageUrl(url) {
+    try {
+      const parsed = new URL(url);
+      return parsed.hostname.endsWith(".gladiatus.gameforge.com")
+        && parsed.pathname.endsWith("/game/index.php")
+        && parsed.searchParams.get("mod") === "auction";
+    } catch {
+      return false;
+    }
   }
 
   const BASE_SORT_OPTIONS = [
@@ -655,6 +672,7 @@
       ensureUi();
     }, 100);
   }
+  window.__GladiatusAuctionBoot = boot;
 
   function scheduleRefresh() {
     if (!document.getElementById(UI_ID)) {

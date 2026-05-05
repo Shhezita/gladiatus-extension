@@ -1,10 +1,10 @@
-# Gladiatus Auction Helper
+# Gladiatus Helper
 
-A small local Chrome extension that adds a sort bar and scanner popup to the Gladiatus auction house.
+A small local Chrome extension that adds a sort bar/scanner popup to the Gladiatus auction house and a basic opponent scanner for arena pages.
 
 It reads the visible auction item tooltip data from `data-tooltip`, parses stat lines such as `Strength +11% (+5)` or `Damage 50 - 62`, and reorders the current auction page in the browser. It works across auction item types because the parser reads the item tooltip data for each visible listing instead of assuming weapons, shields, helmets, or any other category.
 
-It does not bid, buy, call non-game APIs, or send data anywhere. The popup scanner only requests Gladiatus auction pages using the same logged-in tab session and caches the last scan in local extension storage.
+It does not bid, buy, attack, call non-game APIs, or send data anywhere. The popup scanner only requests Gladiatus pages using the active browser session and caches auction scans in local extension storage.
 
 ## Load In Chrome
 
@@ -13,11 +13,15 @@ It does not bid, buy, call non-game APIs, or send data anywhere. The popup scann
 3. Click `Load unpacked`.
 4. Select this folder: `/Users/jankohuic/dev/gladiatus`.
 5. Open the Gladiatus auction house and use the injected `Auction sorter` bar, or open the extension popup and click `Scan auction`.
+6. Open a Gladiatus arena opponent list and use the popup `Scan opponents` button to fetch visible opponent profiles and annotate their rows with primary stat totals.
 
 ## Notes
 
 - Open the extension popup on an auction page and click `Scan auction` to fetch all auction categories with your current name, minimum-level, and quality filters.
-- The popup persists the last scan, so closing and reopening it keeps the scanned item list until the next scan.
+- Open the extension popup on an arena page and click `Scan opponents` to fetch the visible opponent profiles, sum their six primary stats, and show the score next to each arena row.
+- Arena profile fetching is handled by the extension background worker because opponents may be on another Gladiatus province/subdomain.
+- The scanner attempts both auction groups from one button by using the auction-page links for Gladiator necessities and Mercenary necessities.
+- A successful auction scan replaces the current cached item list. The previous scan is compacted into a bounded local archive in extension storage for later debugging/comparison.
 - The popup has `Items` and `Filters` pages. Use `Filters` to create custom score filters without writing formulas.
 - Popup tabs group results into Weapons, Armor, Food, Upgrades, and Mercenaries. Each tab keeps its own selected sort preset.
 - Popup tab and preset clicks also apply the same sort to the visible auction page when the active tab is a Gladiatus auction page.
@@ -56,7 +60,7 @@ The popup uses the same page-level API through a content-script bridge. The sche
 ## Architecture Checks
 
 ```sh
-for file in auction-schema.js auction-core.js auction-model.js content.js popup.js architecture.test.js; do node --check "$file"; done
+for file in auction-schema.js auction-core.js auction-model.js arena-core.js content.js arena-content.js background.js popup.js architecture.test.js; do node --check "$file"; done
 node architecture.test.js
 ```
 

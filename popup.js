@@ -1,13 +1,18 @@
 const SCHEMA = window.GladiatusAuctionSchema;
+const SCORE = window.GladiatusScoreModel;
 const MODEL = window.GladiatusAuctionModel;
-if (!SCHEMA || !MODEL) {
-  throw new Error("Gladiatus auction schema and model must load before the popup.");
+const ARENA = window.GladiatusArenaCore;
+if (!SCHEMA || !SCORE || !MODEL || !ARENA) {
+  throw new Error("Gladiatus auction schema, score model, auction model, and arena core must load before the popup.");
 }
 
 const SCAN_STORAGE_KEY = SCHEMA.storageKeys.scanResult;
+const SCAN_ARCHIVE_STORAGE_KEY = SCHEMA.storageKeys.scanArchive;
 const POPUP_STATE_KEY = SCHEMA.storageKeys.popupState;
 const FILTER_VALUES_STORAGE_KEY = MODEL.filterValuesStorageKey;
+const MAX_SCAN_ARCHIVES = 5;
 
+const titleNode = document.querySelector("h1");
 const scanButton = document.getElementById("scan-button");
 const statusNode = document.getElementById("status");
 const pageTabsNode = document.getElementById("page-tabs");
@@ -21,16 +26,27 @@ const PAGE_DEFINITIONS = [
   { id: "items", label: "Items" },
   { id: "filters", label: "Filters" }
 ];
+const ARENA_PAGE_DEFINITIONS = [
+  { id: "opponents", label: "Opponents" },
+  { id: "formulas", label: "Formulas" }
+];
 const DEFAULT_TERM = { stat: "agility", weight: 1 };
 const DEFAULT_CONSTRAINT = { stat: "damageBonus", op: ">=", value: 0 };
+const DEFAULT_ARENA_TERM = { stat: "agility", weight: 1 };
+const DEFAULT_ARENA_CONSTRAINT = { stat: "level", op: ">=", value: 0 };
 
 let scanResult = null;
+let arenaResult = null;
 let customDefinitions = [];
+let arenaFormulas = [];
 let editorDraft = null;
-let popupState = { pageId: "items", viewId: "weapons", presetByView: {}, filterByView: {} };
+let arenaFormulaDraft = null;
+let popupState = { pageId: "items", arenaPageId: "opponents", viewId: "weapons", presetByView: {}, filterByView: {}, arenaFormulaId: "" };
 let filterValuesByView = {};
+let pageMode = "unsupported";
+let activeTab = null;
 
-scanButton.addEventListener("click", scanAuction);
+scanButton.addEventListener("click", onScanButtonClick);
 pageTabsNode.addEventListener("click", onPageTabClick);
 tabsNode.addEventListener("click", onItemTabClick);
 controlsNode.addEventListener("click", onPresetClick);
@@ -43,14 +59,41 @@ resultsNode.addEventListener("change", onEditorInput);
 init();
 
 async function init() {
+  activeTab = await getActiveTab();
+  pageMode = detectPageMode(activeTab?.url);
   popupState = { ...popupState, ...(await loadStorage(POPUP_STATE_KEY) || {}) };
   scanResult = await loadStorage(SCAN_STORAGE_KEY);
+  arenaResult = await loadStorage(ARENA.resultsStorageKey);
   filterValuesByView = MODEL.normalizeAllFilterValues(await loadStorage(FILTER_VALUES_STORAGE_KEY) || popupState.filterByView);
   await saveStorage(FILTER_VALUES_STORAGE_KEY, filterValuesByView);
   customDefinitions = MODEL.normalizeCustomDefinitions(await loadStorage(MODEL.customDefinitionsStorageKey));
+  arenaFormulas = await loadArenaFormulas();
   editorDraft = makeNewDefinitionDraft();
+  arenaFormulaDraft = makeNewArenaFormulaDraft();
   subscribeToSharedFilterChanges();
   render();
+}
+
+async function getActiveTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tab || null;
+}
+
+function detectPageMode(url) {
+  if (ARENA.isArenaPageUrl(url)) return "arena";
+
+  try {
+    const parsed = new URL(url || "");
+    if (parsed.hostname.endsWith(".gladiatus.gameforge.com")
+      && parsed.pathname.endsWith("/game/index.php")
+      && parsed.searchParams.get("mod") === "auction") {
+      return "auction";
+    }
+  } catch {
+    // Unsupported pages use the default mode.
+  }
+
+  return "unsupported";
 }
 
 function subscribeToSharedFilterChanges() {
@@ -77,13 +120,16 @@ async function scanAuction() {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab || !tab.id) throw new Error("No active tab found.");
+    if (detectPageMode(tab.url) !== "auction") throw new Error("Open a Gladiatus auction page before scanning.");
 
-    const response = await chrome.tabs.sendMessage(tab.id, { type: "GLAD_AH_SCAN_ALL" });
+    const response = await sendAuctionScanMessage(tab);
     if (!response || !response.ok) {
-      throw new Error(response?.error || "The auction page did not return scan results.");
+      throw new Error(response?.error || `The auction page did not return scan results. Response: ${JSON.stringify(response)}`);
     }
 
-    scanResult = response.result;
+    const previousScan = scanResult;
+    scanResult = normalizeScanResult(response.result);
+    await archivePreviousScan(previousScan, scanResult);
     await saveStorage(SCAN_STORAGE_KEY, scanResult);
     popupState.pageId = "items";
     await saveStorage(POPUP_STATE_KEY, popupState);
@@ -95,7 +141,94 @@ async function scanAuction() {
   }
 }
 
+async function sendAuctionScanMessage(tab) {
+  try {
+    const response = await sendTabMessage(tab.id, { type: "GLAD_AH_SCAN_ALL" });
+    if (response) return response;
+  } catch (error) {
+    await ensureAuctionContentScript(tab.id);
+    return sendTabMessage(tab.id, { type: "GLAD_AH_SCAN_ALL" });
+  }
+
+  await ensureAuctionContentScript(tab.id);
+  return sendTabMessage(tab.id, { type: "GLAD_AH_SCAN_ALL" });
+}
+
+function sendTabMessage(tabId, message) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.sendMessage(tabId, message, (response) => {
+      const runtimeError = chrome.runtime.lastError;
+      if (runtimeError) {
+        reject(new Error(runtimeError.message));
+        return;
+      }
+
+      resolve(response);
+    });
+  });
+}
+
+async function ensureAuctionContentScript(tabId) {
+  if (!chrome.scripting?.executeScript) {
+    throw new Error("Auction content script is not available on this tab. Reload the auction page after reloading the extension.");
+  }
+
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ["auction-schema.js", "score-model.js", "auction-model.js", "auction-core.js", "content.js"]
+  });
+}
+
+async function onScanButtonClick() {
+  if (pageMode === "arena") {
+    await scanArena();
+    return;
+  }
+
+  await scanAuction();
+}
+
+async function scanArena() {
+  scanButton.disabled = true;
+  resultsNode.textContent = "";
+  setStatus("Scanning arena opponents...");
+
+  try {
+    activeTab = await getActiveTab();
+    if (!activeTab?.id) throw new Error("No active tab found.");
+    if (detectPageMode(activeTab.url) !== "arena") throw new Error("Open a Gladiatus arena page before scanning opponents.");
+
+    const response = await chrome.tabs.sendMessage(activeTab.id, {
+      type: "GLAD_ARENA_SCAN_OPPONENTS",
+      formula: getSelectedArenaFormula()
+    });
+    if (!response || !response.ok) {
+      throw new Error(response?.error || "The arena page did not return scan results.");
+    }
+
+    arenaResult = response.result;
+    await saveStorage(ARENA.resultsStorageKey, arenaResult);
+    render();
+  } catch (error) {
+    setStatus(error.message || String(error));
+  } finally {
+    scanButton.disabled = false;
+  }
+}
+
 function render() {
+  configureHeader();
+
+  if (pageMode === "arena") {
+    renderArenaPage();
+    return;
+  }
+
+  if (pageMode !== "auction") {
+    renderUnsupportedPage();
+    return;
+  }
+
   renderPageTabs();
 
   if (popupState.pageId === "filters") {
@@ -105,7 +238,27 @@ function render() {
   }
 }
 
+function configureHeader() {
+  if (pageMode === "arena") {
+    titleNode.textContent = "Arena scanner";
+    scanButton.textContent = "Scan opponents";
+    scanButton.hidden = false;
+    return;
+  }
+
+  if (pageMode === "auction") {
+    titleNode.textContent = "Auction scanner";
+    scanButton.textContent = "Scan auction";
+    scanButton.hidden = false;
+    return;
+  }
+
+  titleNode.textContent = "Gladiatus helper";
+  scanButton.hidden = true;
+}
+
 function renderPageTabs() {
+  pageTabsNode.hidden = false;
   const fragment = document.createDocumentFragment();
 
   for (const page of PAGE_DEFINITIONS) {
@@ -125,13 +278,17 @@ function renderItemsPage() {
   const scannedAt = scanResult?.scannedAt ? new Date(scanResult.scannedAt).toLocaleTimeString() : "";
 
   if (scanResult) {
-    setStatus(`Cached scan: ${items.length} items${scannedAt ? ` at ${scannedAt}` : ""}.`);
+    const warnings = scanResult.scanWarnings?.length ? ` ${scanResult.scanWarnings.length} warning(s).` : "";
+    setStatus(`Cached scan: ${items.length} items${scannedAt ? ` at ${scannedAt}` : ""}.${warnings}`);
   } else {
     setStatus("No cached scan. Tabs and sort presets still apply to the visible auction page.");
   }
 
-  summaryNode.hidden = !scanResult?.filterSummary;
-  summaryNode.textContent = scanResult?.filterSummary || "";
+  summaryNode.hidden = !scanResult?.filterSummary && !scanResult?.scanWarnings?.length;
+  summaryNode.textContent = [
+    scanResult?.filterSummary || "",
+    ...(scanResult?.scanWarnings || []).map((warning) => `Warning: ${warning}`)
+  ].filter(Boolean).join(" | ");
   tabsNode.hidden = false;
   controlsNode.hidden = false;
 
@@ -139,6 +296,98 @@ function renderItemsPage() {
   renderItemTabs(items);
   renderControls();
   renderItems();
+}
+
+function renderArenaPage() {
+  renderArenaPageTabs();
+  tabsNode.hidden = true;
+  tabsNode.replaceChildren();
+
+  if (popupState.arenaPageId === "formulas") {
+    renderArenaFormulasPage();
+    return;
+  }
+
+  renderArenaOpponentsPage();
+}
+
+function renderArenaPageTabs() {
+  pageTabsNode.hidden = false;
+  const fragment = document.createDocumentFragment();
+
+  for (const page of ARENA_PAGE_DEFINITIONS) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = page.id === popupState.arenaPageId ? "active" : "";
+    button.dataset.pageId = page.id;
+    button.textContent = page.label;
+    fragment.append(button);
+  }
+
+  pageTabsNode.replaceChildren(fragment);
+}
+
+function renderArenaOpponentsPage() {
+  renderArenaControls();
+
+  if (!arenaResult) {
+    summaryNode.hidden = true;
+    summaryNode.textContent = "";
+    setStatus("Open an arena opponent list, then scan.");
+    resultsNode.innerHTML = '<div class="empty">Scan to fetch the visible opponent profiles and show stat totals next to their arena rows.</div>';
+    return;
+  }
+
+  const scannedAt = arenaResult.scannedAt ? new Date(arenaResult.scannedAt).toLocaleTimeString() : "";
+  const failed = arenaResult.failedCount ? ` ${arenaResult.failedCount} failed.` : "";
+  setStatus(`Scanned ${arenaResult.opponentCount} opponents${scannedAt ? ` at ${scannedAt}` : ""}.${failed}`);
+  summaryNode.hidden = !arenaResult.bestName;
+  summaryNode.textContent = arenaResult.bestName
+    ? `Lowest ${arenaResult.arenaKind === "team" ? "team" : "fighter"} score: ${arenaResult.bestName} (${ARENA.formatNumber(arenaResult.bestScore)})`
+    : "";
+  resultsNode.replaceChildren(renderArenaResults(arenaResult));
+}
+
+function renderArenaControls() {
+  controlsNode.hidden = false;
+  const fragment = document.createDocumentFragment();
+
+  const label = document.createElement("label");
+  label.className = "filter-control";
+
+  const text = document.createElement("span");
+  text.textContent = "Formula";
+
+  const select = document.createElement("select");
+  select.dataset.arenaFormulaSelect = "1";
+  select.disabled = !arenaFormulas.length;
+
+  const enabled = arenaFormulas.filter((candidate) => candidate.enabled);
+  const available = enabled.length ? enabled : arenaFormulas;
+  for (const formula of available) {
+    const option = document.createElement("option");
+    option.value = formula.id;
+    option.textContent = formula.name;
+    select.append(option);
+  }
+
+  select.value = getSelectedArenaFormula().id;
+  label.append(text, select);
+  fragment.append(label);
+  controlsNode.replaceChildren(fragment);
+}
+
+function renderUnsupportedPage() {
+  pageTabsNode.hidden = true;
+  pageTabsNode.replaceChildren();
+  summaryNode.hidden = true;
+  summaryNode.textContent = "";
+  tabsNode.hidden = true;
+  tabsNode.replaceChildren();
+  controlsNode.hidden = true;
+  controlsNode.replaceChildren();
+  setStatus("Open a Gladiatus auction or arena page.");
+  resultsNode.innerHTML = '<div class="empty">This popup changes tools based on the active Gladiatus page.</div>';
 }
 
 function renderFiltersPage() {
@@ -149,6 +398,90 @@ function renderFiltersPage() {
   controlsNode.hidden = true;
   controlsNode.replaceChildren();
   resultsNode.replaceChildren(renderDefinitionManager());
+}
+
+function renderArenaFormulasPage() {
+  setStatus("Create role-aware arena formulas. Enabled formulas can be selected before scanning opponents.");
+  summaryNode.hidden = true;
+  summaryNode.textContent = "";
+  controlsNode.hidden = true;
+  controlsNode.replaceChildren();
+  resultsNode.replaceChildren(renderArenaFormulaManager());
+}
+
+function renderArenaResults(result) {
+  const list = document.createElement("section");
+  list.className = "arena-results";
+
+  const opponents = [...(result.opponents || [])].sort((a, b) => arenaScore(a) - arenaScore(b));
+  for (const opponent of opponents) {
+    list.append(renderArenaOpponent(opponent));
+  }
+
+  return list;
+}
+
+function renderArenaOpponent(result) {
+  const node = document.createElement("article");
+  node.className = "item arena-opponent";
+
+  const detail = document.createElement("div");
+  detail.className = "item-detail";
+
+  const name = document.createElement("div");
+  name.className = "item-name";
+  name.textContent = result.displayName || result.character?.name || result.opponent?.name || "Unknown opponent";
+
+  const scoreNode = document.createElement("div");
+  scoreNode.className = "score";
+  scoreNode.textContent = Number.isFinite(arenaScore(result))
+    ? `${result.team ? "Team score" : "Power score"}: ${ARENA.formatNumber(arenaScore(result))}`
+    : "Profile scan failed";
+
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  meta.textContent = renderArenaMeta(result);
+
+  const stats = document.createElement("div");
+  stats.className = "stats";
+  stats.textContent = renderArenaStats(result);
+
+  detail.append(name, scoreNode, meta, stats);
+  node.append(detail);
+  return node;
+}
+
+function arenaScore(result) {
+  return Number.isFinite(result.score) ? result.score : Number.POSITIVE_INFINITY;
+}
+
+function renderArenaMeta(result) {
+  if (result.error) return result.error;
+  if (result.team) {
+    return [
+      `${result.team.members.length} team members`,
+      result.matches === false ? "Constraints not met" : "",
+      result.opponent?.province ? `Province ${result.opponent.province}` : ""
+    ].filter(Boolean).join(" | ");
+  }
+  if (!result.character) return "";
+
+  return [
+    result.character.level ? `Level ${result.character.level}` : "",
+    result.character.province ? `Province ${result.character.province}` : "",
+    `Damage ${ARENA.formatNumber(result.character.stats.damageAvg || 0)}`,
+    `Armour ${result.character.stats.armour || 0}`,
+    result.matches === false ? "Constraints not met" : ""
+  ].filter(Boolean).join(" | ");
+}
+
+function renderArenaStats(result) {
+  if (result.team) {
+    return result.team.members
+      .map((member) => `${member.roleLabel}: ${ARENA.formatNumber(member.formulaScore)} (${ARENA.formatCharacterStats(member)})`)
+      .join(" / ");
+  }
+  return result.character ? ARENA.formatCharacterStats(result.character) : "";
 }
 
 function ensureValidView(items) {
@@ -568,6 +901,244 @@ function makeStatSelect(name, selected) {
   return select;
 }
 
+function renderArenaFormulaManager() {
+  const container = document.createElement("section");
+  container.className = "definition-page";
+  container.append(renderArenaFormulaEditor(), renderArenaFormulaList());
+  return container;
+}
+
+function renderArenaFormulaEditor() {
+  const editor = document.createElement("section");
+  editor.id = "arena-formula-editor";
+  editor.className = "definition-editor";
+  editor.dataset.formulaId = arenaFormulaDraft.id;
+
+  const title = document.createElement("h2");
+  title.textContent = arenaFormulaDraft.isNew ? "New arena formula" : "Edit arena formula";
+
+  const nameLabel = document.createElement("label");
+  nameLabel.className = "field-row";
+  nameLabel.textContent = "Name";
+  const nameInput = document.createElement("input");
+  nameInput.name = "arena-name";
+  nameInput.type = "text";
+  nameInput.value = arenaFormulaDraft.name;
+  nameLabel.append(nameInput);
+
+  const enabledLabel = document.createElement("label");
+  enabledLabel.className = "check-row";
+  const enabledInput = document.createElement("input");
+  enabledInput.name = "arena-enabled";
+  enabledInput.type = "checkbox";
+  enabledInput.checked = arenaFormulaDraft.enabled !== false;
+  enabledLabel.append(enabledInput, document.createTextNode(" Enabled"));
+
+  editor.append(title, nameLabel, enabledLabel);
+
+  for (const sectionKey of ARENA.roleSectionKeys) {
+    editor.append(renderArenaFormulaSectionEditor(sectionKey, arenaFormulaDraft.sections[sectionKey]));
+  }
+
+  const actions = document.createElement("div");
+  actions.className = "editor-actions";
+
+  const save = document.createElement("button");
+  save.type = "button";
+  save.dataset.action = "save-arena-formula";
+  save.textContent = arenaFormulaDraft.isNew ? "Create formula" : "Save formula";
+
+  const reset = document.createElement("button");
+  reset.type = "button";
+  reset.dataset.action = "new-arena-formula";
+  reset.textContent = "New";
+
+  actions.append(save, reset);
+  editor.append(actions);
+  return editor;
+}
+
+function renderArenaFormulaSectionEditor(sectionKey, section) {
+  const group = document.createElement("section");
+  group.className = "editor-group arena-formula-section";
+  group.dataset.sectionKey = sectionKey;
+
+  const heading = document.createElement("div");
+  heading.className = "editor-heading";
+  heading.textContent = ARENA.roleSectionLabels[sectionKey] || sectionKey;
+  group.append(heading);
+
+  const termsHeading = document.createElement("div");
+  termsHeading.className = "editor-subheading";
+  termsHeading.textContent = "Score terms";
+  group.append(termsHeading);
+
+  (section?.terms || []).forEach((term, index) => {
+    group.append(renderArenaTermRow(sectionKey, term, index));
+  });
+
+  const addTerm = document.createElement("button");
+  addTerm.type = "button";
+  addTerm.dataset.action = "add-arena-term";
+  addTerm.dataset.sectionKey = sectionKey;
+  addTerm.textContent = "Add term";
+  group.append(addTerm);
+
+  const constraintsHeading = document.createElement("div");
+  constraintsHeading.className = "editor-subheading";
+  constraintsHeading.textContent = "Constraints";
+  group.append(constraintsHeading);
+
+  (section?.constraints || []).forEach((constraint, index) => {
+    group.append(renderArenaConstraintRow(sectionKey, constraint, index));
+  });
+
+  const addConstraint = document.createElement("button");
+  addConstraint.type = "button";
+  addConstraint.dataset.action = "add-arena-constraint";
+  addConstraint.dataset.sectionKey = sectionKey;
+  addConstraint.textContent = "Add constraint";
+  group.append(addConstraint);
+  return group;
+}
+
+function renderArenaTermRow(sectionKey, term, index) {
+  const row = document.createElement("div");
+  row.className = "builder-row";
+  row.dataset.sectionKey = sectionKey;
+  row.dataset.arenaTermIndex = String(index);
+
+  const stat = makeArenaStatSelect("arena-term-stat", term.stat);
+  const weight = document.createElement("input");
+  weight.name = "arena-term-weight";
+  weight.type = "number";
+  weight.step = "0.1";
+  weight.value = String(term.weight);
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.dataset.action = "remove-arena-term";
+  remove.dataset.sectionKey = sectionKey;
+  remove.dataset.index = String(index);
+  remove.textContent = "Remove";
+
+  row.append(stat, weight, remove);
+  return row;
+}
+
+function renderArenaConstraintRow(sectionKey, constraint, index) {
+  const row = document.createElement("div");
+  row.className = "builder-row";
+  row.dataset.sectionKey = sectionKey;
+  row.dataset.arenaConstraintIndex = String(index);
+
+  const stat = makeArenaStatSelect("arena-constraint-stat", constraint.stat);
+  const op = document.createElement("select");
+  op.name = "arena-constraint-op";
+  [">=", "<="].forEach((operator) => {
+    const option = document.createElement("option");
+    option.value = operator;
+    option.textContent = operator;
+    op.append(option);
+  });
+  op.value = constraint.op;
+
+  const value = document.createElement("input");
+  value.name = "arena-constraint-value";
+  value.type = "number";
+  value.step = "0.1";
+  value.value = String(constraint.value);
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.dataset.action = "remove-arena-constraint";
+  remove.dataset.sectionKey = sectionKey;
+  remove.dataset.index = String(index);
+  remove.textContent = "Remove";
+
+  row.append(stat, op, value, remove);
+  return row;
+}
+
+function makeArenaStatSelect(name, selected) {
+  const select = document.createElement("select");
+  select.name = name;
+
+  for (const stat of ARENA.statOptions) {
+    const option = document.createElement("option");
+    option.value = stat.key;
+    option.textContent = stat.label;
+    select.append(option);
+  }
+
+  select.value = selected;
+  return select;
+}
+
+function renderArenaFormulaList() {
+  const list = document.createElement("section");
+  list.className = "definition-list";
+
+  const title = document.createElement("h2");
+  title.textContent = "Saved arena formulas";
+  list.append(title);
+
+  if (!arenaFormulas.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = "No arena formulas yet.";
+    list.append(empty);
+    return list;
+  }
+
+  for (const formula of arenaFormulas) {
+    list.append(renderArenaFormulaCard(formula));
+  }
+
+  return list;
+}
+
+function renderArenaFormulaCard(formula) {
+  const card = document.createElement("article");
+  card.className = "definition-card";
+
+  const title = document.createElement("div");
+  title.className = "definition-title";
+  title.textContent = formula.name;
+
+  const enabled = document.createElement("label");
+  enabled.className = "check-row";
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = formula.enabled;
+  checkbox.dataset.action = "toggle-arena-formula";
+  checkbox.dataset.formulaId = formula.id;
+  enabled.append(checkbox, document.createTextNode(" Enabled"));
+
+  const formulaText = document.createElement("div");
+  formulaText.className = "definition-formula";
+  formulaText.textContent = ARENA.formatArenaFormula(formula);
+
+  const actions = document.createElement("div");
+  actions.className = "definition-actions";
+
+  const edit = document.createElement("button");
+  edit.type = "button";
+  edit.dataset.action = "edit-arena-formula";
+  edit.dataset.formulaId = formula.id;
+  edit.textContent = "Edit";
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.dataset.action = "delete-arena-formula";
+  remove.dataset.formulaId = formula.id;
+  remove.textContent = "Delete";
+
+  actions.append(edit, remove);
+  card.append(title, enabled, formulaText, actions);
+  return card;
+}
+
 function renderThumb(item) {
   const thumb = document.createElement("div");
   thumb.className = "item-thumb";
@@ -610,7 +1181,11 @@ function onPageTabClick(event) {
   const button = event.target.closest("button[data-page-id]");
   if (!button) return;
 
-  popupState.pageId = button.dataset.pageId;
+  if (pageMode === "arena") {
+    popupState.arenaPageId = button.dataset.pageId;
+  } else {
+    popupState.pageId = button.dataset.pageId;
+  }
   saveStorage(POPUP_STATE_KEY, popupState);
   render();
 }
@@ -639,6 +1214,13 @@ function onPresetClick(event) {
 }
 
 function onFilterInput(event) {
+  const formulaSelect = event.target.closest("select[data-arena-formula-select]");
+  if (formulaSelect) {
+    popupState.arenaFormulaId = formulaSelect.value;
+    saveStorage(POPUP_STATE_KEY, popupState);
+    return;
+  }
+
   const input = event.target.closest("input[data-filter-id]");
   if (!input) return;
 
@@ -660,6 +1242,13 @@ async function onResultsClick(event) {
   if (!actionNode) return;
 
   const action = actionNode.dataset.action;
+  if (action.includes("-arena-") || action.startsWith("arena-") || action.endsWith("-arena-formula") || action === "save-arena-formula"
+    || action === "new-arena-formula" || action === "edit-arena-formula"
+    || action === "delete-arena-formula" || action === "toggle-arena-formula") {
+    await handleArenaFormulaAction(actionNode, action);
+    return;
+  }
+
   if (action === "add-term") {
     syncEditorDraft();
     editorDraft.terms.push({ ...DEFAULT_TERM });
@@ -737,9 +1326,96 @@ async function onResultsClick(event) {
   }
 }
 
+async function handleArenaFormulaAction(actionNode, action) {
+  const sectionKey = actionNode.dataset.sectionKey;
+
+  if (action === "add-arena-term") {
+    syncArenaFormulaDraft();
+    arenaFormulaDraft.sections[sectionKey].terms.push({ ...DEFAULT_ARENA_TERM });
+    render();
+    return;
+  }
+
+  if (action === "remove-arena-term") {
+    syncArenaFormulaDraft();
+    arenaFormulaDraft.sections[sectionKey].terms.splice(Number(actionNode.dataset.index), 1);
+    render();
+    return;
+  }
+
+  if (action === "add-arena-constraint") {
+    syncArenaFormulaDraft();
+    arenaFormulaDraft.sections[sectionKey].constraints.push({ ...DEFAULT_ARENA_CONSTRAINT });
+    render();
+    return;
+  }
+
+  if (action === "remove-arena-constraint") {
+    syncArenaFormulaDraft();
+    arenaFormulaDraft.sections[sectionKey].constraints.splice(Number(actionNode.dataset.index), 1);
+    render();
+    return;
+  }
+
+  if (action === "new-arena-formula") {
+    arenaFormulaDraft = makeNewArenaFormulaDraft();
+    render();
+    return;
+  }
+
+  if (action === "edit-arena-formula") {
+    const formula = arenaFormulas.find((candidate) => candidate.id === actionNode.dataset.formulaId);
+    if (formula) {
+      arenaFormulaDraft = { ...cloneArenaFormula(formula), isNew: false };
+      render();
+    }
+    return;
+  }
+
+  if (action === "delete-arena-formula") {
+    arenaFormulas = arenaFormulas.filter((formula) => formula.id !== actionNode.dataset.formulaId);
+    if (arenaFormulaDraft.id === actionNode.dataset.formulaId) arenaFormulaDraft = makeNewArenaFormulaDraft();
+    await persistArenaFormulas();
+    render();
+    return;
+  }
+
+  if (action === "toggle-arena-formula") {
+    arenaFormulas = arenaFormulas.map((formula) => formula.id === actionNode.dataset.formulaId
+      ? { ...formula, enabled: actionNode.checked }
+      : formula);
+    await persistArenaFormulas();
+    render();
+    return;
+  }
+
+  if (action === "save-arena-formula") {
+    syncArenaFormulaDraft();
+    const normalized = ARENA.normalizeArenaFormula(arenaFormulaDraft);
+    const error = validateArenaFormula(normalized);
+    if (error) {
+      setStatus(error);
+      return;
+    }
+
+    arenaFormulas = upsertArenaFormula(arenaFormulas, normalized);
+    arenaFormulaDraft = { ...cloneArenaFormula(normalized), isNew: false };
+    popupState.arenaFormulaId = normalized.id;
+    await persistArenaFormulas();
+    await saveStorage(POPUP_STATE_KEY, popupState);
+    render();
+  }
+}
+
 function onEditorInput(event) {
-  if (!event.target.closest("#filter-editor")) return;
-  syncEditorDraft();
+  if (event.target.closest("#arena-formula-editor")) {
+    syncArenaFormulaDraft();
+    return;
+  }
+
+  if (event.target.closest("#filter-editor")) {
+    syncEditorDraft();
+  }
 }
 
 function syncEditorDraft() {
@@ -763,10 +1439,45 @@ function syncEditorDraft() {
   };
 }
 
+function syncArenaFormulaDraft() {
+  const editor = document.getElementById("arena-formula-editor");
+  if (!editor) return;
+
+  const sections = {};
+  for (const sectionKey of ARENA.roleSectionKeys) {
+    const group = editor.querySelector(`[data-section-key='${sectionKey}']`);
+    sections[sectionKey] = {
+      terms: Array.from(group?.querySelectorAll("[data-arena-term-index]") || []).map((row) => ({
+        stat: row.querySelector("select[name='arena-term-stat']")?.value || "agility",
+        weight: Number(row.querySelector("input[name='arena-term-weight']")?.value || 0)
+      })),
+      constraints: Array.from(group?.querySelectorAll("[data-arena-constraint-index]") || []).map((row) => ({
+        stat: row.querySelector("select[name='arena-constraint-stat']")?.value || "level",
+        op: row.querySelector("select[name='arena-constraint-op']")?.value || ">=",
+        value: Number(row.querySelector("input[name='arena-constraint-value']")?.value || 0)
+      }))
+    };
+  }
+
+  arenaFormulaDraft = {
+    ...arenaFormulaDraft,
+    name: editor.querySelector("input[name='arena-name']")?.value || "",
+    enabled: Boolean(editor.querySelector("input[name='arena-enabled']")?.checked),
+    sections
+  };
+}
+
 function validateDefinition(definition) {
   if (!definition.name.trim()) return "Custom filter needs a name.";
   if (!definition.appliesTo.length) return "Select at least one item group.";
   if (!definition.terms.length) return "Add at least one non-zero score term.";
+  return "";
+}
+
+function validateArenaFormula(formula) {
+  if (!formula.name.trim()) return "Arena formula needs a name.";
+  const hasAnyTerms = ARENA.roleSectionKeys.some((sectionKey) => formula.sections[sectionKey].terms.length);
+  if (!hasAnyTerms) return "Add at least one non-zero score term.";
   return "";
 }
 
@@ -777,10 +1488,95 @@ function upsertDefinition(definitions, definition) {
   return definitions.map((candidate, candidateIndex) => candidateIndex === index ? definition : candidate);
 }
 
+function upsertArenaFormula(formulas, formula) {
+  const index = formulas.findIndex((candidate) => candidate.id === formula.id);
+  if (index === -1) return [...formulas, formula];
+
+  return formulas.map((candidate, candidateIndex) => candidateIndex === index ? formula : candidate);
+}
+
 async function persistCustomDefinitions() {
   customDefinitions = MODEL.normalizeCustomDefinitions(customDefinitions);
   await saveStorage(MODEL.customDefinitionsStorageKey, customDefinitions);
   await notifyActivePageDefinitionsChanged();
+}
+
+async function persistArenaFormulas() {
+  arenaFormulas = ARENA.normalizeArenaFormulas(arenaFormulas);
+  await saveStorage(ARENA.formulasStorageKey, arenaFormulas);
+}
+
+function normalizeScanResult(result) {
+  const items = sortScanItems(result?.items || []);
+  const categoryIds = new Set(items.map((item) => item.categoryId).filter(Boolean));
+
+  return {
+    ...result,
+    categoriesScanned: categoryIds.size || result?.categoriesScanned || 0,
+    categoryIdsScanned: result?.categoryIdsScanned || Array.from(categoryIds),
+    scanWarnings: result?.scanWarnings || [],
+    items
+  };
+}
+
+function sortScanItems(items) {
+  const categoryRank = new Map(SCHEMA.scanCategories.map((category, index) => [category.id, index]));
+
+  return [...items].sort((a, b) => {
+    const categoryDiff = (categoryRank.get(a.categoryId) ?? 999) - (categoryRank.get(b.categoryId) ?? 999);
+    if (categoryDiff) return categoryDiff;
+    if ((a.level || 0) !== (b.level || 0)) return (a.level || 0) - (b.level || 0);
+    return (a.name || "").localeCompare(b.name || "");
+  });
+}
+
+async function archivePreviousScan(previous, next) {
+  if (!previous?.items?.length) return;
+  if (scanFingerprint(previous) === scanFingerprint(next)) return;
+
+  const archive = await loadStorage(SCAN_ARCHIVE_STORAGE_KEY);
+  const entries = Array.isArray(archive) ? archive : [];
+  await saveStorage(SCAN_ARCHIVE_STORAGE_KEY, [
+    compactScanArchive(previous, next),
+    ...entries
+  ].slice(0, MAX_SCAN_ARCHIVES));
+}
+
+function scanFingerprint(scan) {
+  return (scan?.items || [])
+    .map((item) => `${item.categoryId || ""}:${item.auctionId || ""}:${item.name || ""}:${item.bidAmount || ""}:${item.priceGold || ""}`)
+    .sort()
+    .join("|");
+}
+
+function compactScanArchive(scan, replacement) {
+  return {
+    archivedAt: new Date().toISOString(),
+    scannedAt: scan.scannedAt || "",
+    replacedByScannedAt: replacement?.scannedAt || "",
+    itemCount: scan.items?.length || 0,
+    categoriesScanned: scan.categoriesScanned || 0,
+    categoryIdsScanned: scan.categoryIdsScanned || [],
+    filterSummary: scan.filterSummary || "",
+    scanWarnings: scan.scanWarnings || [],
+    items: (scan.items || []).map(compactArchivedItem)
+  };
+}
+
+function compactArchivedItem(item) {
+  return {
+    auctionId: item.auctionId || "",
+    name: item.name || "",
+    category: item.category || "",
+    categoryId: item.categoryId || "",
+    viewId: item.viewId || "",
+    itemType: item.itemType || "",
+    level: item.level || 0,
+    itemValue: item.itemValue || 0,
+    bidAmount: item.bidAmount || 0,
+    priceGold: item.priceGold || 0,
+    stats: item.stats || {}
+  };
 }
 
 async function notifyActivePageDefinitionsChanged() {
@@ -812,12 +1608,47 @@ function makeNewDefinitionDraft() {
   };
 }
 
+async function loadArenaFormulas() {
+  const saved = await loadStorage(ARENA.formulasStorageKey);
+  if (saved !== null) return ARENA.normalizeArenaFormulas(saved);
+
+  const formulas = ARENA.normalizeArenaFormulas(saved);
+  if (formulas.length) return formulas;
+
+  const defaults = [ARENA.defaultArenaFormula()];
+  await saveStorage(ARENA.formulasStorageKey, defaults);
+  return defaults;
+}
+
+function makeNewArenaFormulaDraft() {
+  return {
+    ...cloneArenaFormula(ARENA.defaultArenaFormula()),
+    id: `arena-formula-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name: "",
+    isNew: true
+  };
+}
+
 function cloneDefinition(definition) {
   return {
     ...definition,
     appliesTo: [...definition.appliesTo],
     terms: definition.terms.map((term) => ({ ...term })),
     constraints: definition.constraints.map((constraint) => ({ ...constraint }))
+  };
+}
+
+function cloneArenaFormula(formula) {
+  const normalized = ARENA.normalizeArenaFormula(formula) || ARENA.defaultArenaFormula();
+  return {
+    ...normalized,
+    sections: Object.fromEntries(ARENA.roleSectionKeys.map((sectionKey) => [
+      sectionKey,
+      {
+        terms: normalized.sections[sectionKey].terms.map((term) => ({ ...term })),
+        constraints: normalized.sections[sectionKey].constraints.map((constraint) => ({ ...constraint }))
+      }
+    ]))
   };
 }
 
@@ -837,6 +1668,14 @@ function getSelectedPreset(view) {
 
 function getFilterValues(viewId) {
   return MODEL.normalizeFilterValues(viewId, filterValuesByView[viewId]);
+}
+
+function getSelectedArenaFormula() {
+  const enabled = arenaFormulas.filter((formula) => formula.enabled);
+  const formulas = enabled.length ? enabled : arenaFormulas;
+  return formulas.find((formula) => formula.id === popupState.arenaFormulaId)
+    || formulas[0]
+    || ARENA.defaultArenaFormula();
 }
 
 async function applyCurrentSortToPage() {

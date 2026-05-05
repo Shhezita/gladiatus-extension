@@ -91,3 +91,80 @@
   white-space: nowrap;
   z-index: 20;
 }
+
+.glad-arena-score {
+  background: rgba(31, 20, 10, 0.92);
+  border: 1px solid #b98943;
+  color: #ffd98a;
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+  margin-left: 8px;
+  padding: 2px 5px;
+  white-space: nowrap;
+}
+
+.glad-arena-score-error {
+  border-color: #9d3f32;
+  color: #ffb4a8;
+}
+
+.glad-arena-score-warning {
+  border-color: #b48a35;
+  color: #ffe2a1;
+}
+
+tr.glad-arena-best > td {
+  background-color: rgba(58, 42, 18, 0.45);
+}
+
+#glad-arena-scanner {
+  align-items: center;
+  background: #24180f;
+  border: 1px solid #7b5b32;
+  color: #f3ddb2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+  padding: 8px;
+}
+
+#glad-arena-scanner strong {
+  color: #ffd98a;
+  margin-right: 6px;
+}
+
+#glad-arena-scanner label {
+  color: #e9c98c;
+}
+
+#glad-arena-scanner select,
+#glad-arena-scanner button {
+  background: #3b2817;
+  border: 1px solid #9a713d;
+  color: #ffe6ae;
+  font: inherit;
+  min-height: 24px;
+  padding: 2px 7px;
+}
+
+#glad-arena-scanner button {
+  cursor: pointer;
+}
+
+#glad-arena-scanner button:disabled,
+#glad-arena-scanner select:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+#glad-arena-scanner .glad-arena-status {
+  color: #c8aa74;
+  margin-left: auto;
+}
+
+#glad-arena-scanner .glad-arena-status-error {
+  color: #ffb4a8;
+}

@@ -128,14 +128,22 @@ button:disabled {
   gap: 5px;
 }
 
-.filter-control input {
+.filter-control input,
+.filter-control select {
   background: #302214;
   border: 1px solid #60451f;
   color: #fff1c4;
   font: inherit;
   min-height: 26px;
   padding: 3px 6px;
+}
+
+.filter-control input {
   width: 58px;
+}
+
+.filter-control select {
+  min-width: 180px;
 }
 
 .results {
@@ -172,6 +180,7 @@ button:disabled {
 
 .item-detail {
   min-width: 0;
+  width: 100%;
 }
 
 .item-name {
@@ -276,6 +285,14 @@ button:disabled {
   margin-bottom: 6px;
 }
 
+.editor-subheading {
+  color: #a8926a;
+  font-size: 11px;
+  font-weight: 700;
+  margin: 8px 0 5px;
+  text-transform: uppercase;
+}
+
 .editor-actions {
   justify-content: flex-end;
 }
@@ -299,4 +316,13 @@ button:disabled {
 .definition-formula {
   color: #d7c4a0;
   margin-bottom: 8px;
+}
+
+.arena-results {
+  display: grid;
+  gap: 6px;
+}
+
+.arena-opponent {
+  margin-bottom: 0;
 }

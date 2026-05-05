@@ -53,8 +53,10 @@
       return parenthesized.reduce((total, match) => total + (Number.parseInt(match.replace(/[()]/g, ""), 10) || 0), 0);
     }
 
-    const directValues = segment.match(/[+-]\d+/g) || [];
-    return directValues.reduce((total, match) => total + (Number.parseInt(match, 10) || 0), 0);
+    const directValues = segment.match(/[+-]\d+(?:\s*%)?/g) || [];
+    return directValues
+      .filter((match) => !/%/.test(match))
+      .reduce((total, match) => total + (Number.parseInt(match, 10) || 0), 0);
   }
 
   function parseDamageRange(line) {
@@ -195,12 +197,13 @@
     return {
       qry: valueOf("input[name='qry']"),
       itemLevel: valueOf("select[name='itemLevel']", "39"),
-      itemQuality: valueOf("select[name='itemQuality']", "-1")
+      itemQuality: valueOf("select[name='itemQuality']", "-1"),
+      csrfToken: valueOf("input[name='csrf_token']")
     };
   }
 
-  function makeAuctionUrl(ttype) {
-    const url = new URL(window.location.href);
+  function makeAuctionUrl(ttype, baseHref = window.location.href) {
+    const url = new URL(baseHref, window.location.href);
     url.searchParams.set("mod", "auction");
     url.searchParams.delete("submod");
 
@@ -213,12 +216,57 @@
     return url.href;
   }
 
+  function findAuctionTypeUrl(doc, labelPattern, fallbackTtype) {
+    const links = Array.from(doc.querySelectorAll("a[href]"))
+      .map((link) => {
+        try {
+          return {
+            href: new URL(link.getAttribute("href"), window.location.href).href,
+            text: stripHtml(link.textContent || "", doc)
+          };
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean)
+      .filter((link) => {
+        try {
+          return new URL(link.href).searchParams.get("mod") === "auction";
+        } catch {
+          return false;
+        }
+      });
+
+    const labelled = links.find((link) => labelPattern.test(link.text));
+    if (labelled) return labelled.href;
+
+    const byTtype = links.find((link) => new URL(link.href).searchParams.get("ttype") === fallbackTtype);
+    if (byTtype) return byTtype.href;
+
+    return makeAuctionUrl(fallbackTtype || "");
+  }
+
+  function isCurrentDocumentUrl(url) {
+    try {
+      const current = new URL(window.location.href);
+      const candidate = new URL(url, window.location.href);
+      current.hash = "";
+      candidate.hash = "";
+      return current.href === candidate.href;
+    } catch {
+      return false;
+    }
+  }
+
   function makeFilterBody(form, itemType, sharedFilters) {
     const body = new URLSearchParams(new FormData(form));
     body.set("itemType", itemType);
     body.set("qry", sharedFilters.qry || "");
     body.set("itemLevel", sharedFilters.itemLevel || "39");
     body.set("itemQuality", sharedFilters.itemQuality || "-1");
+    if (sharedFilters.csrfToken && !body.has("csrf_token")) {
+      body.set("csrf_token", sharedFilters.csrfToken);
+    }
     return body;
   }
 
@@ -236,35 +284,73 @@
     const sharedFilters = readSharedFilterValues(filterForm);
     const items = [];
     const scannedCategories = [];
+    const scannedCategoryIds = [];
+    const scanWarnings = [];
+    const scanSources = await resolveAuctionScanSources(scanWarnings);
 
-    for (const category of MAIN_SCAN_TYPES) {
-      const doc = await loadFilteredAuctionDocument(makeAuctionUrl(), filterForm, category.itemType, sharedFilters);
-      scannedCategories.push(category.label);
-      items.push(...parseAuctionItemsFromDocument(doc, {
-        categoryId: category.id
-      }));
-    }
+    for (const source of scanSources) {
+      if (!source.form) {
+        scanWarnings.push(`Could not find ${source.label} filter form.`);
+        continue;
+      }
 
-    const mercenaryUrl = makeAuctionUrl("3");
-    const mercenaryBaseDoc = await loadAuctionDocument(mercenaryUrl);
-    const mercenaryForm = getFilterForm(mercenaryBaseDoc);
-
-    if (mercenaryForm) {
-      for (const category of MERCENARY_EQUIPMENT_SCAN_TYPES) {
-        const doc = await loadFilteredAuctionDocument(mercenaryUrl, mercenaryForm, category.itemType, sharedFilters);
-        scannedCategories.push(category.label);
-        items.push(...parseAuctionItemsFromDocument(doc, {
-          categoryId: category.id
-        }));
+      for (const category of source.categories) {
+        try {
+          const doc = await loadFilteredAuctionDocument(source.url, source.form, category.itemType, sharedFilters);
+          scannedCategories.push(category.label);
+          scannedCategoryIds.push(category.id);
+          items.push(...parseAuctionItemsFromDocument(doc, {
+            categoryId: category.id
+          }));
+        } catch (error) {
+          scanWarnings.push(`${category.label}: ${error.message || String(error)}`);
+        }
       }
     }
 
     return {
       scannedAt: new Date().toISOString(),
       categoriesScanned: scannedCategories.length,
+      categoryIdsScanned: scannedCategoryIds,
+      scanWarnings,
       filterSummary: formatFilterSummary(sharedFilters),
       items: sortScannedItems(items)
     };
+  }
+
+  async function resolveAuctionScanSources(scanWarnings) {
+    const mainUrl = findAuctionTypeUrl(document, /gladiator/i, "");
+    const mercenaryUrl = findAuctionTypeUrl(document, /mercenary/i, "3");
+
+    return [
+      await resolveAuctionScanSource({
+        label: "Gladiator necessities",
+        url: mainUrl,
+        categories: MAIN_SCAN_TYPES,
+        scanWarnings
+      }),
+      await resolveAuctionScanSource({
+        label: "Mercenary necessities",
+        url: mercenaryUrl,
+        categories: MERCENARY_EQUIPMENT_SCAN_TYPES,
+        scanWarnings
+      })
+    ];
+  }
+
+  async function resolveAuctionScanSource({ label, url, categories, scanWarnings }) {
+    try {
+      const doc = isCurrentDocumentUrl(url) ? document : await loadAuctionDocument(url);
+      return {
+        label,
+        url,
+        categories,
+        form: getFilterForm(doc)
+      };
+    } catch (error) {
+      scanWarnings.push(`${label}: ${error.message || String(error)}`);
+      return { label, url, categories, form: null };
+    }
   }
 
   async function loadFilteredAuctionDocument(url, form, itemType, sharedFilters) {

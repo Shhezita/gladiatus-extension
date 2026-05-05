@@ -75,18 +75,20 @@ function loadGlobals() {
   context.globalThis = context;
   vm.createContext(context);
 
-  for (const file of ["auction-schema.js", "auction-model.js", "auction-core.js"]) {
+  for (const file of ["auction-schema.js", "score-model.js", "auction-model.js", "auction-core.js", "arena-core.js"]) {
     vm.runInContext(fs.readFileSync(path.join(rootDir, file), "utf8"), context, { filename: file });
   }
 
   return {
     schema: context.GladiatusAuctionSchema,
+    score: context.GladiatusScoreModel,
     model: context.GladiatusAuctionModel,
-    core: context.GladiatusAuctionCore
+    core: context.GladiatusAuctionCore,
+    arena: context.GladiatusArenaCore
   };
 }
 
-const { schema, model, core } = loadGlobals();
+const { schema, score, model, core, arena } = loadGlobals();
 
 {
   const parsed = core.parseStats([
@@ -112,6 +114,38 @@ const { schema, model, core } = loadGlobals();
   assert.equal(parsed.stats.intelligence, 21);
   assert.equal(parsed.level, 88);
   assert.equal(parsed.itemValue, 1234);
+}
+
+{
+  assert.equal(core.parseSignedBonus("Agility +10% (+11)"), 11);
+  assert.equal(core.parseSignedBonus("Agility +10%"), 0);
+}
+
+{
+  const values = new Map([
+    ["#char_level", "48"],
+    ["#char_f0", "65"],
+    ["#char_f1", "138"],
+    ["#char_f2", "189"],
+    ["#char_f3", "83"],
+    ["#char_f4", "155"],
+    ["#char_f5", "52"],
+    ["#char_panzer", "3148"],
+    ["#char_schaden", "108 - 125"],
+    [".playername", "Ikarrus"]
+  ]);
+  const doc = {
+    querySelector(selector) {
+      return values.has(selector) ? { textContent: values.get(selector) } : null;
+    }
+  };
+  const character = arena.parseCharacterFromDocument(doc, { id: "1185379", province: "60" });
+
+  assert.equal(character.name, "Ikarrus");
+  assert.equal(character.level, 48);
+  assert.equal(character.stats.agility, 189);
+  assert.equal(character.stats.damageAvg, 116.5);
+  assert.equal(character.primaryStatSum, 682);
 }
 
 {
@@ -171,6 +205,142 @@ const { schema, model, core } = loadGlobals();
   assert.equal(model.scoreCustomDefinition(item, customDefinition), 72);
   assert.equal(model.itemMatchesCustomDefinition(item, customDefinition), true);
   assert.equal(model.itemMatchesCustomDefinition({ viewId: "armor", stats: { damageBonus: 4 } }, customDefinition), false);
+}
+
+{
+  const section = score.normalizeScoreSection({
+    terms: [
+      { stat: "agility", weight: 1 },
+      { stat: "dexterity", weight: 1 },
+      { stat: "damageAvg", weight: 10 }
+    ]
+  }, { statKeys: arena.statOrder });
+  const character = { stats: { agility: 10, dexterity: 20, damageAvg: 3 } };
+
+  assert.equal(score.score(character, section), 60);
+}
+
+{
+  assert.equal(arena.parseRoleFromTooltipText("Dungeon Battle Quest: Direct attention to oneself"), "tank");
+  assert.equal(arena.parseRoleFromTooltipText("Dungeon Battle Quest: Heal group members"), "healer");
+  assert.equal(arena.parseRoleFromTooltipText("Samnit Quest: Dish out damage"), "damage");
+  assert.equal(arena.parseRoleFromTooltipText("Standard Battle"), "duel");
+}
+
+{
+  const formula = arena.normalizeArenaFormula({
+    id: "test-team",
+    name: "Test team",
+    sections: {
+      duel: { terms: [{ stat: "strength", weight: 1 }] },
+      tank: { terms: [{ stat: "armour", weight: 0.01 }] },
+      healer: { terms: [{ stat: "healing", weight: 1 }] },
+      damage: { terms: [{ stat: "dexterity", weight: 1 }, { stat: "damageAvg", weight: 1 }] }
+    }
+  });
+  const members = [
+    { role: "tank", stats: { armour: 2000 } },
+    { role: "healer", stats: { healing: 500 } },
+    { role: "damage", stats: { dexterity: 100, damageAvg: 50 } },
+    { role: "damage", stats: { dexterity: 80, damageAvg: 40 } },
+    { role: "damage", stats: { dexterity: 70, damageAvg: 30 } }
+  ];
+
+  assert.equal(arena.scoreArenaTeam(members, formula).totalScore, 890);
+}
+
+{
+  const formula = arena.normalizeArenaFormula({
+    id: "empty-healer",
+    name: "Empty healer",
+    sections: {
+      duel: { terms: [{ stat: "strength", weight: 1 }] },
+      healer: { terms: [] }
+    }
+  });
+
+  assert.equal(arena.scoreArenaCharacter({ role: "healer", stats: { strength: 999, healing: 500 } }, formula).score, 0);
+  assert.equal(arena.scoreArenaCharacter({ role: "unknown", stats: { strength: 5 } }, formula).score, 5);
+}
+
+{
+  const legacy = arena.normalizeArenaFormula({
+    id: "legacy-standard",
+    name: "Legacy standard",
+    sections: {
+      standard: { terms: [{ stat: "strength", weight: 2 }] }
+    }
+  });
+
+  assert.equal(arena.scoreArenaCharacter({ role: "duel", stats: { strength: 4 } }, legacy).score, 8);
+}
+
+{
+  const tabs = [
+    { doll: 1, url: "doll1" },
+    { doll: 2, url: "doll2" },
+    { doll: 3, url: "doll3" },
+    { doll: 4, url: "doll4" },
+    { doll: 5, url: "doll5" },
+    { doll: 6, url: "doll6" }
+  ];
+
+  assert.deepEqual(arena.teamDollTabs(tabs).map((tab) => tab.doll), [2, 3, 4, 5, 6]);
+}
+
+{
+  assert.equal(arena.parseFightArgs("startGroupFight(this, 4078517)").arenaKind, "team");
+  assert.equal(arena.parseFightArgs("startProvinciarumFight(this, 3, 219763, 55, 'en');").arenaKind, "team");
+  assert.equal(arena.parseFightArgs("startProvinciarumFight(this, 2, 219763, 55, 'en');").arenaKind, "single");
+}
+
+{
+  const makeRow = ({ href, name, onclick, cells }) => {
+    const link = {
+      textContent: name,
+      getAttribute(attribute) {
+        return attribute === "href" ? href : "";
+      }
+    };
+    const attack = {
+      getAttribute(attribute) {
+        return attribute === "onclick" ? onclick : "";
+      }
+    };
+    return {
+      cells: cells.map((textContent) => ({ textContent })),
+      querySelector(selector) {
+        if (selector.startsWith("a[")) return link;
+        if (selector.startsWith(".attack")) return attack;
+        return null;
+      }
+    };
+  };
+  const rows = [
+    makeRow({
+      href: "https://s55-en.gladiatus.gameforge.com/game/index.php?mod=player&p=219763&language=en",
+      name: "Morvisus",
+      onclick: "startProvinciarumFight(this, 3, 219763, 55, 'en');",
+      cells: ["Morvisus", "55", "55", ""]
+    }),
+    makeRow({
+      href: "https://s47-en.gladiatus.gameforge.com/game/index.php?mod=player&p=4078517&sh=test",
+      name: "namsis",
+      onclick: "startGroupFight(this, 4078517)",
+      cells: ["10", "namsis", ""]
+    })
+  ];
+  const doc = {
+    location: { href: "https://s47-en.gladiatus.gameforge.com/game/index.php?mod=arena&submod=serverArena&aType=3&sh=test" },
+    querySelectorAll(selector) {
+      return selector === "#content tr" ? rows : [];
+    }
+  };
+  const entries = arena.readArenaOpponentEntries(doc);
+
+  assert.equal(entries.length, 2);
+  assert.equal(entries[0].opponent.arenaKind, "team");
+  assert.equal(entries[1].opponent.arenaKind, "team");
 }
 
 console.log("architecture tests passed");

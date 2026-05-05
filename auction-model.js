@@ -1,8 +1,11 @@
 (() => {
   const root = typeof globalThis !== "undefined" ? globalThis : window;
   const SCHEMA = root.GladiatusAuctionSchema;
+  const SCORE = root.GladiatusScoreModel || installFallbackScoreModel(root);
   if (!SCHEMA) {
-    throw new Error("GladiatusAuctionSchema must load before GladiatusAuctionModel.");
+    // Non-auction pages do not need the auction model. The auction content script
+    // performs a strict dependency check only when it is actually on auction.
+    return;
   }
 
   if (root.GladiatusAuctionModel) return;
@@ -14,8 +17,108 @@
   const CUSTOM_SORT_PREFIX = "custom:";
   const STAT_LABELS = SCHEMA.statLabels;
   const STAT_ORDER = SCHEMA.statOrder;
-  const VALID_STAT_KEYS = new Set(STAT_ORDER);
-  const VALID_CONSTRAINT_OPERATORS = new Set([">=", "<="]);
+
+  function installFallbackScoreModel(target) {
+    const validConstraintOperators = new Set([">=", "<="]);
+
+    function normalizeDefinition(definition, options = {}) {
+      if (!definition || typeof definition !== "object") return null;
+      const section = normalizeScoreSection(definition, options);
+      return {
+        id: sanitizeId(definition.id) || makeId(options.idPrefix || "score"),
+        name: String(definition.name || "").trim() || options.defaultName || "Untitled score",
+        appliesTo: normalizeAppliesTo(definition.appliesTo, options.validAppliesTo),
+        terms: section.terms,
+        constraints: section.constraints,
+        enabled: definition.enabled !== false
+      };
+    }
+
+    function normalizeDefinitions(definitions, options = {}) {
+      return Array.isArray(definitions)
+        ? definitions.map((definition) => normalizeDefinition(definition, options)).filter(Boolean)
+        : [];
+    }
+
+    function normalizeScoreSection(section, options = {}) {
+      const statKeys = Array.isArray(options.statKeys) ? new Set(options.statKeys) : null;
+      const terms = Array.isArray(section?.terms)
+        ? section.terms.map((term) => normalizeTerm(term, statKeys)).filter(Boolean)
+        : [];
+      const constraints = Array.isArray(section?.constraints)
+        ? section.constraints.map((constraint) => normalizeConstraint(constraint, statKeys)).filter(Boolean)
+        : [];
+      return { terms, constraints };
+    }
+
+    function normalizeTerm(term, statKeys) {
+      if (!term || typeof term !== "object" || (statKeys && !statKeys.has(term.stat))) return null;
+      const weight = Number(term.weight);
+      return Number.isFinite(weight) && weight !== 0 ? { stat: term.stat, weight } : null;
+    }
+
+    function normalizeConstraint(constraint, statKeys) {
+      if (!constraint || typeof constraint !== "object" || (statKeys && !statKeys.has(constraint.stat))) return null;
+      if (!validConstraintOperators.has(constraint.op)) return null;
+      const value = Number(constraint.value);
+      return Number.isFinite(value) ? { stat: constraint.stat, op: constraint.op, value } : null;
+    }
+
+    function normalizeAppliesTo(appliesTo, validAppliesTo) {
+      if (!Array.isArray(appliesTo)) return [];
+      if (!validAppliesTo) return [...new Set(appliesTo.map(String).filter(Boolean))];
+      const valid = new Set(validAppliesTo);
+      return appliesTo.map(String).filter((value, index, source) => valid.has(value) && source.indexOf(value) === index);
+    }
+
+    function score(record, section, getStat = (item, key) => Number(item?.stats?.[key]) || 0) {
+      return (section?.terms || []).reduce((total, term) => total + getStat(record, term.stat) * term.weight, 0);
+    }
+
+    function matches(record, section, getStat = (item, key) => Number(item?.stats?.[key]) || 0) {
+      return (section?.constraints || []).every((constraint) => {
+        const value = getStat(record, constraint.stat);
+        return constraint.op === ">=" ? value >= constraint.value : value <= constraint.value;
+      });
+    }
+
+    function summarizeDefinition(definition, labels = {}) {
+      const terms = (definition?.terms || []).map((term) => `${formatNumber(term.weight)} x ${labels[term.stat] || term.stat}`).join(" + ");
+      const constraints = (definition?.constraints || [])
+        .map((constraint) => `${labels[constraint.stat] || constraint.stat} ${constraint.op} ${formatNumber(constraint.value)}`)
+        .join(", ");
+      return [terms || "0", constraints ? `requires ${constraints}` : ""].filter(Boolean).join("; ");
+    }
+
+    function sanitizeId(value) {
+      return String(value || "").trim().replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+    }
+
+    function makeId(prefix = "score") {
+      return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    }
+
+    function formatNumber(value) {
+      if (!Number.isFinite(value)) return "0";
+      if (Number.isInteger(value)) return String(value);
+      return value >= 10 ? value.toFixed(1) : value.toFixed(3);
+    }
+
+    const api = {
+      formatNumber,
+      makeId,
+      matches,
+      normalizeDefinition,
+      normalizeDefinitions,
+      normalizeScoreSection,
+      sanitizeId,
+      score,
+      summarizeDefinition,
+      summarizeSection: summarizeDefinition
+    };
+    target.GladiatusScoreModel = api;
+    return api;
+  }
 
   function defineItemView(definition) {
     return {
@@ -232,57 +335,20 @@
   }
 
   function normalizeCustomDefinitions(definitions) {
-    return Array.isArray(definitions)
-      ? definitions.map(normalizeCustomDefinition).filter(Boolean)
-      : [];
+    return SCORE.normalizeDefinitions(definitions, customDefinitionOptions());
   }
 
   function normalizeCustomDefinition(definition) {
-    if (!definition || typeof definition !== "object") return null;
+    return SCORE.normalizeDefinition(definition, customDefinitionOptions());
+  }
 
-    const id = sanitizeId(definition.id) || makeDefinitionId();
-    const name = String(definition.name || "").trim() || "Untitled filter";
-    const appliesTo = Array.isArray(definition.appliesTo)
-      ? definition.appliesTo.filter((viewId, index, source) => getView(viewId) && source.indexOf(viewId) === index)
-      : [];
-    const terms = Array.isArray(definition.terms)
-      ? definition.terms
-        .map(normalizeTerm)
-        .filter(Boolean)
-      : [];
-    const constraints = Array.isArray(definition.constraints)
-      ? definition.constraints
-        .map(normalizeConstraint)
-        .filter(Boolean)
-      : [];
-
+  function customDefinitionOptions() {
     return {
-      id,
-      name,
-      appliesTo,
-      terms,
-      constraints,
-      enabled: definition.enabled !== false
+      defaultName: "Untitled filter",
+      idPrefix: "filter",
+      statKeys: STAT_ORDER,
+      validAppliesTo: VIEW_DEFINITIONS.map((view) => view.id)
     };
-  }
-
-  function normalizeTerm(term) {
-    if (!term || typeof term !== "object" || !VALID_STAT_KEYS.has(term.stat)) return null;
-
-    const weight = Number(term.weight);
-    if (!Number.isFinite(weight) || weight === 0) return null;
-
-    return { stat: term.stat, weight };
-  }
-
-  function normalizeConstraint(constraint) {
-    if (!constraint || typeof constraint !== "object" || !VALID_STAT_KEYS.has(constraint.stat)) return null;
-    if (!VALID_CONSTRAINT_OPERATORS.has(constraint.op)) return null;
-
-    const value = Number(constraint.value);
-    if (!Number.isFinite(value)) return null;
-
-    return { stat: constraint.stat, op: constraint.op, value };
   }
 
   function getCustomPresetOptionsForView(viewId, customDefinitions = []) {
@@ -318,32 +384,22 @@
   }
 
   function scoreCustomDefinition(item, definition) {
-    return normalizeCustomDefinition(definition)?.terms
-      .reduce((total, term) => total + stat(item, term.stat) * term.weight, 0) || 0;
+    const normalized = normalizeCustomDefinition(definition);
+    return normalized ? SCORE.score(item, normalized, stat) : 0;
   }
 
   function itemMatchesCustomDefinition(item, definition) {
     const normalized = normalizeCustomDefinition(definition);
     if (!normalized) return false;
 
-    return normalized.constraints.every((constraint) => {
-      const value = stat(item, constraint.stat);
-      return constraint.op === ">=" ? value >= constraint.value : value <= constraint.value;
-    });
+    return SCORE.matches(item, normalized, stat);
   }
 
   function summarizeCustomDefinition(definition) {
     const normalized = normalizeCustomDefinition(definition);
     if (!normalized) return "";
 
-    const terms = normalized.terms
-      .map((term) => `${formatNumber(term.weight)} x ${STAT_LABELS[term.stat] || term.stat}`)
-      .join(" + ");
-    const constraints = normalized.constraints
-      .map((constraint) => `${STAT_LABELS[constraint.stat] || constraint.stat} ${constraint.op} ${formatNumber(constraint.value)}`)
-      .join(", ");
-
-    return [terms || "0", constraints ? `requires ${constraints}` : ""].filter(Boolean).join("; ");
+    return SCORE.summarizeDefinition(normalized, STAT_LABELS);
   }
 
   function describeActiveFilters(viewId, values) {
@@ -418,14 +474,6 @@
   function numericFilterValue(value, fallback = 0) {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : fallback;
-  }
-
-  function sanitizeId(value) {
-    return String(value || "").trim().replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
-  }
-
-  function makeDefinitionId() {
-    return `filter-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }
 
   function formatNumber(value) {

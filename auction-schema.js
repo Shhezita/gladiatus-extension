@@ -6,6 +6,7 @@
     customDefinitions: "glad-ah-custom-definitions-v1",
     filterValues: "glad-ah-filter-values-v1",
     popupState: "glad-ah-popup-state-v1",
+    scanArchive: "glad-ah-scan-archive-v1",
     scanResult: "glad-ah-last-scan-v1",
     sortState: "glad-ah-sorter-state-v1"
   };
