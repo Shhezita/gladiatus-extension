@@ -62,6 +62,7 @@ button:disabled {
   padding: 8px 12px;
 }
 
+.page-tabs,
 .tabs {
   background: #1d150f;
   border-bottom: 1px solid #332416;
@@ -71,7 +72,16 @@ button:disabled {
   padding: 8px;
 }
 
+.page-tabs {
+  padding-bottom: 0;
+}
+
+.page-tabs button {
+  border-bottom: 0;
+}
+
 .tabs button,
+.page-tabs button,
 .controls button {
   background: #302214;
   border-color: #60451f;
@@ -81,6 +91,7 @@ button:disabled {
 }
 
 .tabs button.active,
+.page-tabs button.active,
 .controls button.active {
   background: #755024;
   border-color: #d8a14d;
@@ -101,6 +112,30 @@ button:disabled {
   color: #c8aa74;
   font-weight: 700;
   margin-right: 2px;
+}
+
+.control-separator {
+  color: #60451f;
+  font-weight: 700;
+  padding: 0 2px;
+}
+
+.filter-control {
+  align-items: center;
+  color: #d8c294;
+  display: inline-flex;
+  font-weight: 700;
+  gap: 5px;
+}
+
+.filter-control input {
+  background: #302214;
+  border: 1px solid #60451f;
+  color: #fff1c4;
+  font: inherit;
+  min-height: 26px;
+  padding: 3px 6px;
+  width: 58px;
 }
 
 .results {
@@ -163,4 +198,105 @@ button:disabled {
 .empty {
   color: #9d8a68;
   padding: 12px;
+}
+
+.definition-page {
+  display: grid;
+  gap: 10px;
+}
+
+.definition-editor,
+.definition-card {
+  background: #201811;
+  border: 1px solid #43301c;
+  padding: 9px;
+}
+
+.definition-editor h2,
+.definition-list h2 {
+  color: #ffd98a;
+  font-size: 13px;
+  margin: 0 0 8px;
+}
+
+.field-row,
+.check-row,
+.builder-row,
+.editor-actions,
+.definition-actions {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.field-row {
+  align-items: flex-start;
+  flex-direction: column;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.field-row input,
+.builder-row input,
+.builder-row select {
+  background: #302214;
+  border: 1px solid #60451f;
+  color: #fff1c4;
+  font: inherit;
+  min-height: 26px;
+  padding: 3px 6px;
+}
+
+.field-row input {
+  width: 100%;
+}
+
+.builder-row {
+  margin-bottom: 6px;
+}
+
+.builder-row select {
+  min-width: 110px;
+}
+
+.builder-row input {
+  width: 72px;
+}
+
+.editor-group {
+  border: 1px solid #332416;
+  margin: 8px 0;
+  padding: 8px;
+}
+
+.editor-group legend,
+.editor-heading {
+  color: #c8aa74;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.editor-actions {
+  justify-content: flex-end;
+}
+
+.definition-list {
+  display: grid;
+  gap: 6px;
+}
+
+.definition-title {
+  color: #f4dfa8;
+  font-weight: 700;
+  margin-bottom: 5px;
+}
+
+.definition-meta {
+  color: #a8926a;
+  margin: 5px 0;
+}
+
+.definition-formula {
+  color: #d7c4a0;
+  margin-bottom: 8px;
 }

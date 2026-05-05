@@ -18,11 +18,16 @@ It does not bid, buy, call non-game APIs, or send data anywhere. The popup scann
 
 - Open the extension popup on an auction page and click `Scan auction` to fetch all auction categories with your current name, minimum-level, and quality filters.
 - The popup persists the last scan, so closing and reopening it keeps the scanned item list until the next scan.
+- The popup has `Items` and `Filters` pages. Use `Filters` to create custom score filters without writing formulas.
 - Popup tabs group results into Weapons, Armor, Food, Upgrades, and Mercenaries. Each tab keeps its own selected sort preset.
 - Popup tab and preset clicks also apply the same sort to the visible auction page when the active tab is a Gladiatus auction page.
 - Popup item rows show thumbnails when the game exposes an image URL or inline icon background style in the auction markup.
 - Default popup sorting is average weapon damage, food healing per gold, armor main-character score, upgrade damage, and mercenary agility.
 - The in-page auction sorter uses those same defaults for each auction item type, then remembers manual sort changes per item type.
+- The in-page sort dropdown only shows preset scores for the current item group; generic stat and field sorts remain available everywhere.
+- Enabled custom filters are saved in `chrome.storage.local` under `glad-ah-custom-definitions-v1` and appear as group-specific custom score presets.
+- Popup and in-page filter values are shared in `chrome.storage.local` under `glad-ah-filter-values-v1`.
+- Armor has a configurable `Min bonus damage` filter. It defaults to `0`, so it only filters once raised.
 - Armor main-character score is `agility + dexterity + ((damage bonus + strength / 10) * 8)`.
 - Sorting affects only the currently visible auction page.
 - Use the game filter first for item type, level, and quality, then sort the visible results by Strength, Dexterity, Agility, Constitution, Charisma, Intelligence, Life points, Health, Armour, Damage bonus, weapon damage, Block value, Healing, Threat, and related values.
@@ -32,9 +37,10 @@ It does not bid, buy, call non-game APIs, or send data anywhere. The popup scann
 
 ## DevTools API
 
-The shared scanner/parser is exposed on the auction page as:
+The shared schema and scanner/parser are exposed on the auction page as:
 
 ```js
+window.GladiatusAuctionSchema
 window.GladiatusAuctionCore
 ```
 
@@ -45,7 +51,61 @@ await window.GladiatusAuctionCore.scanAllAuctionItems()
 window.GladiatusAuctionCore.parseStats(["Healing +87,+11", "Intelligence +21"])
 ```
 
-The popup uses the same page-level API through a content-script bridge. The core API is loaded in Chrome's MAIN world so DevTools and the extension exercise the same code. The scan API first tries normal page fetches and falls back to hidden same-origin iframe/form loads when fetches are blocked.
+The popup uses the same page-level API through a content-script bridge. The schema owns stat keys, display labels, stable auction category ids, and storage keys. The core API is loaded in Chrome's MAIN world so DevTools and the extension exercise the same parser and scanner code. The scan API first tries normal page fetches and falls back to hidden same-origin iframe/form loads when fetches are blocked.
+
+## Architecture Checks
+
+```sh
+for file in auction-schema.js auction-core.js auction-model.js content.js popup.js architecture.test.js; do node --check "$file"; done
+node architecture.test.js
+```
+
+## Adding Presets And Filters
+
+Auction groups, score formulas, and filters are isolated in `auction-model.js`. Stable stat/category/storage contracts are isolated in `auction-schema.js`. The popup and content script consume those definitions instead of duplicating formulas.
+
+Custom filters created in the popup use this shape:
+
+```js
+{
+  id: "armor-dps",
+  name: "Armor DPS",
+  appliesTo: ["armor"],
+  terms: [
+    { stat: "agility", weight: 1 },
+    { stat: "dexterity", weight: 1 },
+    { stat: "damageBonus", weight: 10 }
+  ],
+  constraints: [
+    { stat: "damageBonus", op: ">=", value: 6 }
+  ],
+  enabled: true
+}
+```
+
+The score is the sum of each stat multiplied by its weight. Constraints support `>=` and `<=`; all constraints must pass for an item to remain visible when that custom preset is selected.
+
+To add a numeric minimum filter to a group, add it to that view:
+
+```js
+filters: [
+  defineMinimumStatFilter({
+    id: "minDamageBonus",
+    label: "Min bonus damage",
+    statKey: "damageBonus"
+  })
+]
+```
+
+Score presets use the same pattern:
+
+```js
+defineScorePreset({
+  id: "main",
+  label: "Main: Agi/Dex + dmg x8",
+  score: mainCharacterScore
+})
+```
 
 ## Parsed Tooltip Formats
 

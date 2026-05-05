@@ -1,56 +1,23 @@
 (() => {
-  if (window.GladiatusAuctionCore) {
+  const root = typeof globalThis !== "undefined" ? globalThis : window;
+  const SCHEMA = root.GladiatusAuctionSchema;
+  if (!SCHEMA) {
+    throw new Error("GladiatusAuctionSchema must load before GladiatusAuctionCore.");
+  }
+
+  if (root.GladiatusAuctionCore) {
     if (shouldInstallPageBridge()) {
-      installPageBridge(window.GladiatusAuctionCore);
+      installPageBridge(root.GladiatusAuctionCore);
     }
     return;
   }
 
   const CARD_SELECTOR = "form[id^='auctionForm']";
-  const STAT_NAMES = [
-    "Strength",
-    "Dexterity",
-    "Agility",
-    "Constitution",
-    "Charisma",
-    "Intelligence",
-    "Life points",
-    "Damage",
-    "Health",
-    "Armour",
-    "Block value",
-    "Healing",
-    "Critical attack value",
-    "Critical healing value",
-    "Critical damage",
-    "Threat",
-    "Hardening value"
-  ];
-  const MAIN_SCAN_TYPES = [
-    { value: "1", label: "Weapons" },
-    { value: "2", label: "Shields" },
-    { value: "3", label: "Chest Armour" },
-    { value: "4", label: "Helmets" },
-    { value: "5", label: "Gloves" },
-    { value: "8", label: "Shoes" },
-    { value: "6", label: "Rings" },
-    { value: "9", label: "Amulets" },
-    { value: "7", label: "Usable" },
-    { value: "11", label: "Reinforcements" },
-    { value: "12", label: "Upgrades" },
-    { value: "15", label: "Mercenary Contracts" }
-  ];
-  const MERCENARY_EQUIPMENT_SCAN_TYPES = [
-    { value: "1", label: "Mercenary Weapons" },
-    { value: "2", label: "Mercenary Shields" },
-    { value: "3", label: "Mercenary Chest Armour" },
-    { value: "4", label: "Mercenary Helmets" },
-    { value: "5", label: "Mercenary Gloves" },
-    { value: "8", label: "Mercenary Shoes" },
-    { value: "6", label: "Mercenary Rings" },
-    { value: "9", label: "Mercenary Amulets" }
-  ];
+  const STAT_NAMES = SCHEMA.tooltipStatNames;
+  const MAIN_SCAN_TYPES = SCHEMA.mainScanCategories;
+  const MERCENARY_EQUIPMENT_SCAN_TYPES = SCHEMA.mercenaryEquipmentScanCategories;
 
+  // Page and tooltip parsing
   function isAuctionPage(doc = document) {
     try {
       return new URL(doc.location?.href || window.location.href).searchParams.get("mod") === "auction";
@@ -60,7 +27,7 @@
   }
 
   function keyForStat(name) {
-    return name.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    return SCHEMA.keyForTooltipStat(name);
   }
 
   function stripHtml(value, doc = document) {
@@ -255,6 +222,7 @@
     return body;
   }
 
+  // Scan orchestration and page loading
   async function scanAllAuctionItems() {
     if (!isAuctionPage()) {
       throw new Error("Open a Gladiatus auction page before scanning.");
@@ -269,13 +237,11 @@
     const items = [];
     const scannedCategories = [];
 
-    for (const type of MAIN_SCAN_TYPES) {
-      const doc = await loadFilteredAuctionDocument(makeAuctionUrl(), filterForm, type.value, sharedFilters);
-      scannedCategories.push(type.label);
+    for (const category of MAIN_SCAN_TYPES) {
+      const doc = await loadFilteredAuctionDocument(makeAuctionUrl(), filterForm, category.itemType, sharedFilters);
+      scannedCategories.push(category.label);
       items.push(...parseAuctionItemsFromDocument(doc, {
-        category: type.label,
-        group: "Gladiator necessities",
-        itemType: type.value
+        categoryId: category.id
       }));
     }
 
@@ -284,13 +250,11 @@
     const mercenaryForm = getFilterForm(mercenaryBaseDoc);
 
     if (mercenaryForm) {
-      for (const type of MERCENARY_EQUIPMENT_SCAN_TYPES) {
-        const doc = await loadFilteredAuctionDocument(mercenaryUrl, mercenaryForm, type.value, sharedFilters);
-        scannedCategories.push(type.label);
+      for (const category of MERCENARY_EQUIPMENT_SCAN_TYPES) {
+        const doc = await loadFilteredAuctionDocument(mercenaryUrl, mercenaryForm, category.itemType, sharedFilters);
+        scannedCategories.push(category.label);
         items.push(...parseAuctionItemsFromDocument(doc, {
-          category: type.label,
-          group: "Mercenary necessities",
-          itemType: type.value
+          categoryId: category.id
         }));
       }
     }
@@ -418,34 +382,57 @@
     if (form) form.remove();
   }
 
+  // DOM extraction and normalized item records
+  function normalizeItemMeta(meta = {}) {
+    const category = meta.categoryId
+      ? SCHEMA.getScanCategory(meta.categoryId)
+      : SCHEMA.getCategoryForItemType(meta.itemType, meta.ttype);
+    const itemType = String(meta.itemType || category?.itemType || "");
+
+    return {
+      categoryId: String(meta.categoryId || category?.id || ""),
+      viewId: String(meta.viewId || category?.viewId || SCHEMA.defaultViewIdForItemType(itemType)),
+      category: String(meta.category || category?.label || ""),
+      group: String(meta.group || category?.group || ""),
+      itemType,
+      ttype: String(meta.ttype || category?.ttype || "")
+    };
+  }
+
+  function parseAuctionItemFromForm(form, index = 0, meta = {}) {
+    const icon = form.querySelector("[data-tooltip]");
+    if (!icon) return null;
+
+    const itemMeta = normalizeItemMeta(meta);
+    const lines = parseTooltipLines(icon, form.ownerDocument || icon.ownerDocument || document);
+    const parsed = parseStats(lines);
+
+    return {
+      auctionId: getAuctionId(form, index),
+      categoryId: itemMeta.categoryId,
+      viewId: itemMeta.viewId,
+      category: itemMeta.category,
+      group: itemMeta.group,
+      itemType: itemMeta.itemType,
+      ttype: itemMeta.ttype,
+      name: lines[0] || "Unknown item",
+      priceGold: parseInteger(icon.dataset?.priceGold || icon.getAttribute("data-price-gold")),
+      bidAmount: parseInteger(form.querySelector("input[name='bid_amount']")?.value),
+      contentType: icon.getAttribute("data-content-type") || "",
+      basis: icon.getAttribute("data-basis") || "",
+      itemClass: icon.className || "",
+      imageSrc: readIconImageSrc(icon),
+      imageStyle: icon.getAttribute("style") || "",
+      lines,
+      level: parsed.level,
+      itemValue: parsed.itemValue,
+      stats: parsed.stats
+    };
+  }
+
   function parseAuctionItemsFromDocument(doc, meta = {}) {
     return Array.from(doc.querySelectorAll(CARD_SELECTOR))
-      .map((form, index) => {
-        const icon = form.querySelector("[data-tooltip]");
-        if (!icon) return null;
-
-        const lines = parseTooltipLines(icon, doc);
-        const parsed = parseStats(lines);
-
-        return {
-          auctionId: getAuctionId(form, index),
-          category: meta.category || "",
-          group: meta.group || "",
-          itemType: meta.itemType || "",
-          name: lines[0] || "Unknown item",
-          priceGold: parseInteger(icon.dataset?.priceGold || icon.getAttribute("data-price-gold")),
-          bidAmount: parseInteger(form.querySelector("input[name='bid_amount']")?.value),
-          contentType: icon.getAttribute("data-content-type") || "",
-          basis: icon.getAttribute("data-basis") || "",
-          itemClass: icon.className || "",
-          imageSrc: readIconImageSrc(icon),
-          imageStyle: icon.getAttribute("style") || "",
-          lines,
-          level: parsed.level,
-          itemValue: parsed.itemValue,
-          stats: parsed.stats
-        };
-      })
+      .map((form, index) => parseAuctionItemFromForm(form, index, meta))
       .filter(Boolean);
   }
 
@@ -461,11 +448,11 @@
   function sortScannedItems(items) {
     const categoryRank = new Map(
       [...MAIN_SCAN_TYPES, ...MERCENARY_EQUIPMENT_SCAN_TYPES]
-        .map((type, index) => [type.label, index])
+        .map((category, index) => [category.id, index])
     );
 
     return items.sort((a, b) => {
-      const categoryDiff = (categoryRank.get(a.category) ?? 999) - (categoryRank.get(b.category) ?? 999);
+      const categoryDiff = (categoryRank.get(a.categoryId) ?? 999) - (categoryRank.get(b.categoryId) ?? 999);
       if (categoryDiff) return categoryDiff;
       if (a.level !== b.level) return a.level - b.level;
       return a.name.localeCompare(b.name);
@@ -505,16 +492,19 @@
     parseDamageRange,
     parseTooltipLines,
     parseStats,
+    normalizeItemMeta,
+    parseAuctionItemFromForm,
     parseAuctionItemsFromDocument,
     scanAllAuctionItems
   };
 
-  window.GladiatusAuctionCore = api;
+  root.GladiatusAuctionCore = api;
 
   if (shouldInstallPageBridge()) {
     installPageBridge(api);
   }
 
+  // Page-world bridge
   function shouldInstallPageBridge() {
     const hasExtensionRuntime = typeof chrome !== "undefined" && Boolean(chrome.runtime?.id);
     return document.currentScript?.dataset.gladAuctionPageBridge === "1" || !hasExtensionRuntime;

@@ -20,6 +20,7 @@
 }
 
 #glad-ah-sorter select,
+#glad-ah-sorter input,
 #glad-ah-sorter button {
   background: #3b2817;
   border: 1px solid #9a713d;
@@ -27,6 +28,10 @@
   font: inherit;
   min-height: 24px;
   padding: 2px 7px;
+}
+
+#glad-ah-sorter input {
+  width: 58px;
 }
 
 #glad-ah-sorter button {
@@ -41,6 +46,28 @@
 #glad-ah-sorter .glad-ah-count {
   color: #c8aa74;
   margin-left: auto;
+}
+
+#glad-ah-filter-controls {
+  align-items: center;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.glad-ah-filter-title {
+  color: #c8aa74;
+  font-weight: 700;
+}
+
+.glad-ah-filter-control {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.glad-ah-filtered-hidden {
+  display: none !important;
 }
 
 .auction_item_div {
