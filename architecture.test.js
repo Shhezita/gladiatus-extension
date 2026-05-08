@@ -69,7 +69,12 @@ function loadGlobals() {
     console,
     URL,
     chrome: { runtime: { id: "test-extension" } },
-    document: makeDocument()
+    document: makeDocument(),
+    DOMParser: class {
+      parseFromString(html) {
+        return makeParsedHtmlDocument(html);
+      }
+    }
   };
   context.window = context;
   context.globalThis = context;
@@ -172,6 +177,67 @@ function makeContentDocument() {
   };
 }
 
+function makeParsedHtmlDocument(html) {
+  const rows = [];
+  const rowPattern = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
+  for (const match of String(html || "").matchAll(rowPattern)) {
+    const rowHtml = match[1];
+    const linkTagMatch = rowHtml.match(/<a\b[^>]*href\s*=\s*(["'])(.*?)\1[^>]*>([\s\S]*?)<\/a>/i);
+    const attackTag = Array.from(rowHtml.matchAll(/<[^>]*>/g))
+      .map((tagMatch) => tagMatch[0])
+      .find((tag) => /\bclass\s*=\s*(["'])[^"']*\battack\b[^"']*\1/i.test(tag)) || "";
+    const href = decodeHtml(linkTagMatch?.[2] || "");
+    const linkText = stripHtml(linkTagMatch?.[3] || "");
+    const onclick = decodeHtml(readHtmlAttribute(attackTag, "onclick"));
+    const cells = Array.from(rowHtml.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gi))
+      .map((cell) => ({ textContent: stripHtml(cell[1]) }));
+    const link = {
+      textContent: linkText,
+      getAttribute(attribute) {
+        return attribute === "href" ? href : "";
+      }
+    };
+    const attack = {
+      getAttribute(attribute) {
+        return attribute === "onclick" ? onclick : "";
+      }
+    };
+    rows.push({
+      cells,
+      querySelector(selector) {
+        if (selector.startsWith("a[")) return href ? link : null;
+        if (selector.startsWith(".attack")) return onclick ? attack : null;
+        return null;
+      }
+    });
+  }
+
+  return {
+    location: { href: "about:blank" },
+    querySelectorAll(selector) {
+      return selector === "#content tr" ? rows : [];
+    }
+  };
+}
+
+function readHtmlAttribute(tag, attribute) {
+  const pattern = new RegExp(`${attribute}\\s*=\\s*("|')([\\s\\S]*?)\\1`, "i");
+  return tag.match(pattern)?.[2] || "";
+}
+
+function stripHtml(value) {
+  return decodeHtml(String(value || "").replace(/<[^>]+>/g, "").trim());
+}
+
+function decodeHtml(value) {
+  return String(value || "")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#039;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+
 function makeElement(tagName) {
   return {
     tagName: String(tagName || "").toUpperCase(),
@@ -249,9 +315,11 @@ const { schema, score, model, core, arena } = loadGlobals();
     "auction-model.js",
     "auction-core.js",
     "arena-core.js",
+    "arena-scan.js",
     "auction-content.js",
     "arena-content.js"
   ]);
+  assert.ok(isolatedEntries[0].js.indexOf("arena-scan.js") < isolatedEntries[0].js.indexOf("arena-content.js"));
   assert.equal(fs.existsSync(path.join(rootDir, "content.js")), false);
 
   const referencedFiles = [
@@ -601,6 +669,46 @@ const { schema, score, model, core, arena } = loadGlobals();
   assert.equal(entries.length, 2);
   assert.equal(entries[0].opponent.arenaKind, "team");
   assert.equal(entries[1].opponent.arenaKind, "team");
+}
+
+{
+  const baseUrl = "https://s47-en.gladiatus.gameforge.com/game/index.php?mod=arena&submod=serverArena&aType=2&sh=test";
+  const html = `
+    <div id="content">
+      <table>
+        <tr>
+          <td><a href="/game/index.php?mod=player&amp;p=111&amp;sh=test">Alpha</a></td>
+          <td>45</td>
+          <td>47</td>
+          <td><div class="attack" onclick="startProvinciarumFight(this, 2, 111, 47, 'en');"></div></td>
+        </tr>
+        <tr>
+          <td><a href="/game/index.php?mod=player&amp;p=222&amp;sh=test">Beta</a></td>
+          <td>46</td>
+          <td>47</td>
+          <td><div class="attack" onclick="startProvinciarumFight(this, 2, 222, 47, 'en');"></div></td>
+        </tr>
+      </table>
+    </div>
+  `;
+  const entries = arena.readArenaOpponentEntriesFromHtml(html, baseUrl);
+  const fingerprint = arena.arenaOpponentFingerprint(entries);
+
+  assert.equal(entries.length, 2);
+  assert.equal(entries[0].opponent.arenaKind, "single");
+  assert.equal(entries[0].opponent.profileUrl, "https://s47-en.gladiatus.gameforge.com/game/index.php?mod=player&p=111&sh=test");
+  assert.equal(fingerprint, arena.arenaOpponentFingerprint(entries.map((entry) => entry.opponent)));
+  assert.equal(fingerprint, arena.arenaOpponentFingerprint(entries.map((entry) => ({
+    opponent: {
+      ...entry.opponent,
+      profileUrl: entry.opponent.profileUrl.replace("sh=test", "sh=other")
+    }
+  }))));
+  assert.notEqual(fingerprint, arena.arenaOpponentFingerprint(entries.slice().reverse()));
+}
+
+{
+  assert.equal(arena.passiveScansStorageKey, "glad-arena-passive-scans-v1");
 }
 
 console.log("architecture tests passed");

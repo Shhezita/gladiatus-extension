@@ -1,8 +1,9 @@
 (() => {
   const ARENA = window.GladiatusArenaCore;
+  const SCANNER = window.GladiatusArenaScanner;
   if (!isArenaPageUrl(window.location.href)) return;
 
-  if (!ARENA) {
+  if (!ARENA || !SCANNER) {
     registerMissingArenaDependencyDiagnostic();
     return;
   }
@@ -27,7 +28,7 @@
   }
 
   function registerMissingArenaDependencyDiagnostic() {
-    const error = "Arena content script dependency missing: arena-core.js. Reload the unpacked extension and refresh this arena tab.";
+    const error = "Arena content script dependency missing: arena-core.js or arena-scan.js. Reload the unpacked extension and refresh this arena tab.";
     console.error(error);
 
     if (typeof chrome === "undefined" || !chrome.runtime?.onMessage) return;
@@ -59,34 +60,11 @@
       throw new Error("Open a Gladiatus arena page before scanning opponents.");
     }
 
-    const formula = ARENA.normalizeArenaFormula(rawFormula) || ARENA.defaultArenaFormula();
-    const entries = ARENA.readArenaOpponentEntries(document);
-    if (!entries.length) {
-      throw new Error("Could not find arena opponent rows.");
-    }
-
     clearArenaBadges();
-    const opponents = [];
-    for (const entry of entries) {
-      opponents.push(await scanOpponentEntry(entry, formula));
-      await delay(150);
-    }
-    annotateRows(entries, opponents);
-
-    const successful = opponents.filter((entry) => Number.isFinite(entry.score));
-    const best = [...successful].sort((a, b) => a.score - b.score)[0] || null;
-
-    return {
-      scannedAt: new Date().toISOString(),
-      formulaId: formula.id,
-      formulaName: formula.name,
-      arenaKind: ARENA.arenaKindFromUrl(window.location.href),
-      opponentCount: opponents.length,
-      failedCount: opponents.filter((entry) => entry.error).length,
-      bestName: best?.displayName || "",
-      bestScore: best?.score || 0,
-      opponents
-    };
+    const result = await SCANNER.scanCurrentPage(rawFormula, { force: true });
+    clearArenaBadges();
+    annotateResult(result);
+    return result;
   }
 
   async function loadFormulaState() {
@@ -131,87 +109,23 @@
     await chrome.storage.local.set({ [ARENA.resultsStorageKey]: result });
   }
 
-  async function scanOpponentEntry(entry, formula) {
-    try {
-      const html = await fetchProfileHtml(entry.opponent.profileUrl);
-      return entry.opponent.arenaKind === "team"
-        ? await scanTeamOpponent(entry, html, formula)
-        : scanSingleOpponent(entry, html, formula);
-    } catch (error) {
-      return {
-        rowIndex: entry.opponent.rowIndex,
-        opponent: { ...entry.opponent },
-        score: Number.POSITIVE_INFINITY,
-        displayName: entry.opponent.name,
-        error: error.message || String(error)
-      };
-    }
+  function annotateResult(result) {
+    const entries = ARENA.readArenaOpponentEntries(document, window.location.href);
+    annotateRows(entries, result?.opponents || []);
   }
 
-  function scanSingleOpponent(entry, html, formula) {
-    const character = ARENA.parseCharacterFromHtml(html, {
-      ...entry.opponent,
-      role: "duel",
-      roleLabel: ARENA.roleSectionLabels.duel
-    }).toJSON();
-    const scored = ARENA.scoreArenaCharacter(character, formula);
-
-    return {
-      rowIndex: entry.opponent.rowIndex,
-      opponent: { ...entry.opponent },
-      displayName: character.name,
-      score: scored.score,
-      matches: scored.matches,
-      formulaSection: scored.sectionKey,
-      character
-    };
-  }
-
-  async function scanTeamOpponent(entry, html, formula) {
-    const tabs = ARENA.teamDollTabs(ARENA.readProfileDollTabsFromHtml(html, entry.opponent.profileUrl));
-    if (!tabs.length) throw new Error("Could not find Circus team tabs on profile.");
-
-    const characters = [];
-    for (const tab of tabs) {
-      const dollHtml = await fetchProfileHtml(tab.url);
-      characters.push(ARENA.parseCharacterFromHtml(dollHtml, {
-        ...entry.opponent,
-        profileUrl: tab.url,
-        doll: tab.doll,
-        role: tab.role,
-        roleLabel: tab.roleLabel
-      }).toJSON());
-      await delay(150);
-    }
-    const team = ARENA.scoreArenaTeam(characters, formula);
-
-    return {
-      rowIndex: entry.opponent.rowIndex,
-      opponent: { ...entry.opponent },
-      displayName: entry.opponent.name,
-      score: team.totalScore,
-      matches: team.matches,
-      team
-    };
-  }
-
-  function fetchProfileHtml(url) {
-    return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage({ type: "GLAD_ARENA_FETCH_PROFILE", url }, (response) => {
-        const runtimeError = chrome.runtime.lastError;
-        if (runtimeError) {
-          reject(new Error(runtimeError.message));
-          return;
-        }
-
-        if (!response?.ok) {
-          reject(new Error(response?.error || "Could not fetch profile."));
-          return;
-        }
-
-        resolve(response.html || "");
-      });
+  async function annotateCachedResult() {
+    const result = await SCANNER.ensureScanForCurrentPage(getSelectedFormula(), {
+      updateLastResult: true,
+      scanSource: "visible"
     });
+    if (!result) return false;
+
+    clearArenaBadges();
+    annotateResult(result);
+    const status = document.querySelector(`#${PANEL_ID} .glad-arena-status`);
+    if (status) setPanelStatus(status, resultStatusText(result, "Cached"), false);
+    return true;
   }
 
   function annotateRows(entries, opponents) {
@@ -279,7 +193,12 @@
     select.id = "glad-arena-formula";
     renderFormulaOptions(select);
     select.addEventListener("change", () => {
-      saveSelectedFormulaId(select.value).catch(() => {});
+      saveSelectedFormulaId(select.value)
+        .then(() => {
+          clearArenaBadges();
+          return annotateCachedResult();
+        })
+        .catch(() => {});
     });
 
     const button = document.createElement("button");
@@ -321,16 +240,18 @@
       const result = await scanOpponents(formula);
       await saveArenaResult(result);
 
-      const failed = result.failedCount ? `, ${result.failedCount} failed` : "";
-      setPanelStatus(
-        status,
-        result.bestName ? `Best: ${result.bestName} (${ARENA.formatNumber(result.bestScore)})${failed}` : `Scanned ${result.opponentCount}${failed}`,
-        false
-      );
+      setPanelStatus(status, resultStatusText(result, "Best"), false);
     } finally {
       button.disabled = false;
       select.disabled = false;
     }
+  }
+
+  function resultStatusText(result, prefix) {
+    const failed = result.failedCount ? `, ${result.failedCount} failed` : "";
+    return result.bestName
+      ? `${prefix}: ${result.bestName} (${ARENA.formatNumber(result.bestScore)})${failed}`
+      : `Scanned ${result.opponentCount}${failed}`;
   }
 
   function setPanelStatus(status, text, isError) {
@@ -338,15 +259,16 @@
     status.classList.toggle("glad-arena-status-error", Boolean(isError));
   }
 
-  function delay(milliseconds) {
-    return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
-  }
-
   function boot() {
     window.clearTimeout(bootTimer);
     bootTimer = window.setTimeout(() => {
       loadFormulaState()
-        .then(ensurePanel)
+        .then(async () => {
+          ensurePanel();
+          subscribeToPassiveCacheChanges();
+          await SCANNER.rememberCurrentListUrl(window.location.href);
+          await annotateCachedResult();
+        })
         .catch(() => {
           arenaFormulas = [ARENA.defaultArenaFormula()];
           selectedFormulaId = arenaFormulas[0].id;
@@ -358,6 +280,16 @@
   const observer = new MutationObserver(() => {
     if (!document.getElementById(PANEL_ID)) boot();
   });
+
+  function subscribeToPassiveCacheChanges() {
+    if (!chrome.storage?.onChanged || window.__GladiatusArenaPassiveCacheListener) return;
+
+    window.__GladiatusArenaPassiveCacheListener = (changes, areaName) => {
+      if (areaName !== "local" || !changes[ARENA.passiveScansStorageKey]) return;
+      annotateCachedResult().catch(() => {});
+    };
+    chrome.storage.onChanged.addListener(window.__GladiatusArenaPassiveCacheListener);
+  }
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", boot, { once: true });

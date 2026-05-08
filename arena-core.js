@@ -10,6 +10,7 @@
 
   const FORMULAS_STORAGE_KEY = "glad-arena-formulas-v1";
   const RESULTS_STORAGE_KEY = "glad-arena-last-scan-v1";
+  const PASSIVE_SCANS_STORAGE_KEY = "glad-arena-passive-scans-v1";
   const TEAM_DOLL_MIN = 2;
   const TEAM_DOLL_MAX = 6;
 
@@ -368,7 +369,7 @@
     return ROLE_SECTION_KEYS.includes(role) ? role : "duel";
   }
 
-  function readArenaOpponentEntries(doc = document) {
+  function readArenaOpponentEntries(doc = document, baseUrl = "") {
     const rows = Array.from(doc.querySelectorAll("#content tr"))
       .filter((row) => row.querySelector("a[href*='mod=player'][href*='p=']"))
       .filter((row) => row.querySelector(".attack[onclick]"));
@@ -380,17 +381,23 @@
         row,
         link,
         attack,
-        opponent: readOpponentFromRow(row, link, attack, rowIndex, doc)
+        opponent: readOpponentFromRow(row, link, attack, rowIndex, doc, baseUrl)
       };
     });
   }
 
-  function readOpponentFromRow(row, link, attack, rowIndex, doc = document) {
-    const profileUrl = new URL(link.getAttribute("href"), doc.location?.href || root.location?.href || "");
+  function readArenaOpponentEntriesFromHtml(html, baseUrl = "") {
+    const parser = new DOMParser();
+    return readArenaOpponentEntries(parser.parseFromString(String(html || ""), "text/html"), baseUrl);
+  }
+
+  function readOpponentFromRow(row, link, attack, rowIndex, doc = document, baseUrl = "") {
+    const sourceUrl = baseUrl || doc.location?.href || root.location?.href || "";
+    const profileUrl = new URL(link.getAttribute("href"), sourceUrl);
     const cells = Array.from(row.cells || []);
     const onclick = attack?.getAttribute("onclick") || "";
     const fightArgs = parseFightArgs(onclick);
-    const arenaKind = fightArgs.arenaKind || arenaKindFromUrl(doc.location?.href || root.location?.href || "");
+    const arenaKind = fightArgs.arenaKind || arenaKindFromUrl(sourceUrl);
 
     return {
       rowIndex,
@@ -402,6 +409,29 @@
       language: profileUrl.searchParams.get("language") || fightArgs.language || "",
       profileUrl: profileUrl.href
     };
+  }
+
+  function arenaOpponentFingerprint(entries) {
+    return (entries || [])
+      .map((entry) => entry?.opponent || entry)
+      .map((opponent) => [
+        String(opponent?.arenaKind || ""),
+        String(opponent?.id || ""),
+        normalizeFingerprintUrl(opponent?.profileUrl || "")
+      ].join(":"))
+      .join("|");
+  }
+
+  function normalizeFingerprintUrl(value) {
+    try {
+      const url = new URL(String(value || ""));
+      url.hash = "";
+      url.searchParams.delete("sh");
+      url.searchParams.sort();
+      return url.href;
+    } catch {
+      return String(value || "");
+    }
   }
 
   function parseFightArgs(onclick) {
@@ -552,7 +582,9 @@
     arenaKindFromUrl,
     defaultArenaFormula,
     formulasStorageKey: FORMULAS_STORAGE_KEY,
+    passiveScansStorageKey: PASSIVE_SCANS_STORAGE_KEY,
     resultsStorageKey: RESULTS_STORAGE_KEY,
+    arenaOpponentFingerprint,
     formatArenaFormula: summarizeArenaFormula,
     formatCharacterStats,
     formatNumber,
@@ -568,6 +600,7 @@
     primaryStatKeys: PRIMARY_STAT_KEYS,
     profileSelectors: PROFILE_SELECTORS,
     readArenaOpponentEntries,
+    readArenaOpponentEntriesFromHtml,
     readProfileDollTabsFromDocument,
     readProfileDollTabsFromHtml,
     roleSectionKeys: ROLE_SECTION_KEYS,
