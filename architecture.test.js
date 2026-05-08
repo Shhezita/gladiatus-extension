@@ -93,6 +93,56 @@ function loadGlobals() {
   };
 }
 
+function makeBackgroundScannerContext(options = {}) {
+  const storage = options.storage || {};
+  const context = {
+    console: { ...console, log() {}, warn() {} },
+    URL,
+    Date,
+    Math,
+    fetch: options.fetch || (async () => {
+      throw new Error("Unexpected fetch in background scanner test.");
+    }),
+    setTimeout(callback) {
+      callback();
+      return 1;
+    },
+    clearTimeout() {},
+    chrome: {
+      storage: {
+        local: {
+          async get(keys) {
+            if (Array.isArray(keys)) {
+              return Object.fromEntries(keys.map((key) => [key, storage[key]]));
+            }
+            if (typeof keys === "string") return { [keys]: storage[keys] };
+            if (keys && typeof keys === "object") {
+              return Object.fromEntries(Object.keys(keys).map((key) => [key, storage[key] ?? keys[key]]));
+            }
+            return { ...storage };
+          },
+          async set(values) {
+            Object.assign(storage, values || {});
+          }
+        }
+      }
+    }
+  };
+  context.self = context;
+  context.globalThis = context;
+  vm.createContext(context);
+
+  for (const file of ["score-model.js", "arena-core.js", "arena-background-scan.js"]) {
+    vm.runInContext(fs.readFileSync(path.join(rootDir, file), "utf8"), context, { filename: file });
+  }
+
+  return {
+    arena: context.GladiatusArenaCore,
+    scanner: context.GladiatusArenaBackgroundScanner,
+    storage
+  };
+}
+
 function makeAuctionContentContext(listeners) {
   const context = {
     console: { ...console, error() {}, warn() {} },
@@ -304,9 +354,17 @@ const { schema, score, model, core, arena } = loadGlobals();
 
 {
   const manifest = JSON.parse(fs.readFileSync(path.join(rootDir, "manifest.json"), "utf8"));
+  const backgroundSource = fs.readFileSync(path.join(rootDir, "background.js"), "utf8");
   const mainEntry = manifest.content_scripts.find((entry) => entry.world === "MAIN");
   const isolatedEntries = manifest.content_scripts.filter((entry) => entry.world !== "MAIN");
 
+  assert.equal(manifest.background.service_worker, "background.js");
+  assert.match(backgroundSource, /importScripts\("score-model\.js", "arena-core\.js", "arena-background-scan\.js"\);/);
+  assert.ok(backgroundSource.indexOf("score-model.js") < backgroundSource.indexOf("arena-core.js"));
+  assert.ok(backgroundSource.indexOf("arena-core.js") < backgroundSource.indexOf("arena-background-scan.js"));
+  const repairFiles = backgroundSource.match(/const AUCTION_CONTENT_FILES = \[([\s\S]*?)\];/)?.[1] || "";
+  assert.ok(repairFiles.indexOf("\"arena-scan.js\"") < repairFiles.indexOf("\"arena-content.js\""));
+  assert.equal(repairFiles.includes("arena-background-scan.js"), false);
   assert.deepEqual(mainEntry.js, ["auction-schema.js", "auction-core.js"]);
   assert.equal(isolatedEntries.length, 1);
   assert.deepEqual(isolatedEntries[0].js, [
@@ -325,6 +383,8 @@ const { schema, score, model, core, arena } = loadGlobals();
   const referencedFiles = [
     ...manifest.content_scripts.flatMap((entry) => [...(entry.js || []), ...(entry.css || [])]),
     ...manifest.web_accessible_resources.flatMap((entry) => entry.resources || []),
+    manifest.background.service_worker,
+    "arena-background-scan.js",
     "popup.js",
     "popup/runtime.js",
     "popup/store.js",
@@ -711,4 +771,157 @@ const { schema, score, model, core, arena } = loadGlobals();
   assert.equal(arena.passiveScansStorageKey, "glad-arena-passive-scans-v1");
 }
 
-console.log("architecture tests passed");
+function arenaListFixture({ aType = "2", players = [] } = {}) {
+  return `
+    <div id="content">
+      <table>
+        ${players.map((player) => `
+          <tr>
+            <td><a href="/game/index.php?mod=player&amp;p=${player.id}&amp;sh=test">${player.name}</a></td>
+            <td>${player.level || 50}</td>
+            <td>${player.province || 47}</td>
+            <td><div class="attack" onclick="startProvinciarumFight(this, ${aType}, ${player.id}, ${player.province || 47}, 'en');"></div></td>
+          </tr>
+        `).join("")}
+      </table>
+    </div>
+  `;
+}
+
+function profileFixture(name, options = {}) {
+  return `
+    <html>
+      <body>
+        <span class="playername">${name}</span>
+        <span id="char_level">${options.level || 50}</span>
+        <span id="char_f0">${options.strength || 60}</span>
+        <span id="char_f1">${options.dexterity || 70}</span>
+        <span id="char_f2">${options.agility || 80}</span>
+        <span id="char_f3">${options.constitution || 90}</span>
+        <span id="char_f4">${options.charisma || 100}</span>
+        <span id="char_f5">${options.intelligence || 110}</span>
+        <span id="char_panzer">${options.armour || 1200}</span>
+        <span id="char_schaden">${options.damage || "30 - 50"}</span>
+        <span id="char_healing">${options.healing || 400}</span>
+        ${options.tabs || ""}
+      </body>
+    </html>
+  `;
+}
+
+function teamTabsFixture(playerId) {
+  const roles = [
+    ["tank", "Dungeon Battle Quest: Direct attention to oneself"],
+    ["healer", "Dungeon Battle Quest: Heal group members"],
+    ["damage", "Samnit Quest: Dish out damage"],
+    ["damage", "Samnit Quest: Dish out damage"],
+    ["damage", "Samnit Quest: Dish out damage"]
+  ];
+  return roles.map(([role, tooltip], index) => {
+    const doll = index + 2;
+    const active = index === 0 ? " active" : "";
+    return `
+      <div class="charmercsel ${role}${active}" onclick="selectDoll('/game/index.php?mod=player&amp;p=${playerId}&amp;doll=${doll}&amp;sh=test')">
+        <span data-tooltip='["${tooltip}"]'></span>
+      </div>
+    `;
+  }).join("");
+}
+
+function backgroundFetchFixture({ singleList, teamList, profileHtmls, calls }) {
+  return async (rawUrl) => {
+    const url = new URL(String(rawUrl));
+    calls.push(url.href);
+    let html = "";
+    if (url.searchParams.get("mod") === "arena") {
+      html = url.searchParams.get("aType") === "3" || url.searchParams.get("submod") === "grouparena"
+        ? teamList
+        : singleList;
+    } else if (url.searchParams.get("mod") === "player") {
+      html = profileHtmls[url.searchParams.get("p")] || profileHtmls.default;
+    }
+    return {
+      ok: true,
+      status: 200,
+      async text() {
+        return html;
+      }
+    };
+  };
+}
+
+function isProfileFetch(url) {
+  return new URL(url).searchParams.get("mod") === "player";
+}
+
+async function runBackgroundScannerTests() {
+  const singleArenaUrl = "https://s47-en.gladiatus.gameforge.com/game/index.php?mod=arena&submod=serverArena&aType=2&sh=test";
+  const teamArenaUrl = "https://s47-en.gladiatus.gameforge.com/game/index.php?mod=arena&submod=serverArena&aType=3&sh=test";
+  const singleList = arenaListFixture({ aType: "2", players: [{ id: "111", name: "Alpha" }] });
+  const changedSingleList = arenaListFixture({ aType: "2", players: [{ id: "333", name: "Gamma" }] });
+  const teamList = arenaListFixture({ aType: "3", players: [{ id: "222", name: "Bravo" }] });
+  const profileHtmls = {
+    111: profileFixture("Alpha"),
+    222: profileFixture("Bravo", { tabs: teamTabsFixture("222") }),
+    333: profileFixture("Gamma", { dexterity: 130 }),
+    default: profileFixture("Fallback")
+  };
+  const calls = [];
+  const { arena: backgroundArena, scanner, storage } = makeBackgroundScannerContext({
+    fetch: backgroundFetchFixture({ singleList, teamList, profileHtmls, calls })
+  });
+
+  const parsedEntries = scanner.readArenaOpponentEntriesFromHtml(singleList, singleArenaUrl);
+  assert.equal(parsedEntries.length, 1);
+  assert.equal(parsedEntries[0].opponent.id, "111");
+  assert.equal(parsedEntries[0].opponent.arenaKind, "single");
+
+  const parsedCharacter = scanner.parseCharacterFromHtml(profileHtmls[111], { id: "111" });
+  assert.equal(parsedCharacter.name, "Alpha");
+  assert.equal(parsedCharacter.stats.dexterity, 70);
+  assert.equal(parsedCharacter.stats.damageAvg, 40);
+
+  const tabs = scanner.readProfileDollTabsFromHtml(profileHtmls[222], "https://s47-en.gladiatus.gameforge.com/game/index.php?mod=player&p=222&sh=test");
+  assert.equal(tabs.length, 5);
+  assert.equal(tabs[0].doll, 2);
+  assert.equal(tabs[0].role, "tank");
+  assert.equal(tabs[1].role, "healer");
+
+  const singleEntries = scanner.readArenaOpponentEntriesFromHtml(singleList, singleArenaUrl);
+  const teamEntries = scanner.readArenaOpponentEntriesFromHtml(teamList, teamArenaUrl);
+  await scanner.forceScan({ url: singleArenaUrl, entries: singleEntries });
+  await scanner.forceScan({ url: teamArenaUrl, entries: teamEntries });
+
+  const cacheKey = backgroundArena.passiveScansStorageKey;
+  assert.equal(storage[cacheKey].single.result.arenaKind, "single");
+  assert.equal(storage[cacheKey].team.result.arenaKind, "team");
+  assert.equal(storage[cacheKey].single.result.opponents[0].opponent.id, "111");
+  assert.equal(storage[cacheKey].team.result.opponents[0].opponent.id, "222");
+
+  const quiet = await scanner.passiveCheck({ url: singleArenaUrl, preferredKind: "single" });
+  assert.equal(quiet.find((result) => result.kind === "single").skipped, "quiet");
+
+  const old = new Date(Date.now() - 11 * 60 * 1000).toISOString();
+  storage[cacheKey].single.scannedAt = old;
+  storage[cacheKey].single.checkedAt = old;
+  storage[cacheKey].single.result.scannedAt = old;
+  const profileCallsBeforeUnchanged = calls.filter(isProfileFetch).length;
+  const unchanged = await scanner.passiveCheck({ url: singleArenaUrl, preferredKind: "single" });
+  assert.equal(unchanged.find((result) => result.kind === "single").skipped, "unchanged");
+  assert.equal(calls.filter(isProfileFetch).length, profileCallsBeforeUnchanged);
+
+  const changedEntries = scanner.readArenaOpponentEntriesFromHtml(changedSingleList, singleArenaUrl);
+  const profileCallsBeforeVisible = calls.filter(isProfileFetch).length;
+  await scanner.ensureVisibleScan({ url: singleArenaUrl, entries: changedEntries });
+  assert.ok(calls.filter(isProfileFetch).length > profileCallsBeforeVisible);
+  assert.equal(storage[cacheKey].single.result.opponents[0].opponent.id, "333");
+}
+
+runBackgroundScannerTests()
+  .then(() => {
+    console.log("architecture tests passed");
+  })
+  .catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });

@@ -114,11 +114,16 @@
     annotateRows(entries, result?.opponents || []);
   }
 
-  async function annotateCachedResult() {
-    const result = await SCANNER.ensureScanForCurrentPage(getSelectedFormula(), {
-      updateLastResult: true,
-      scanSource: "visible"
-    });
+  async function annotateCachedResult(options = {}) {
+    const result = options.fromStorage
+      ? await SCANNER.getCachedResultForCurrentPage(getSelectedFormula(), {
+        updateLastResult: true,
+        scanSource: "storage"
+      })
+      : await SCANNER.ensureScanForCurrentPage(getSelectedFormula(), {
+        updateLastResult: true,
+        scanSource: "visible"
+      });
     if (!result) return false;
 
     clearArenaBadges();
@@ -286,7 +291,7 @@
 
     window.__GladiatusArenaPassiveCacheListener = (changes, areaName) => {
       if (areaName !== "local" || !changes[ARENA.passiveScansStorageKey]) return;
-      annotateCachedResult().catch(() => {});
+      annotateCachedResult({ fromStorage: true }).catch(() => {});
     };
     chrome.storage.onChanged.addListener(window.__GladiatusArenaPassiveCacheListener);
   }
