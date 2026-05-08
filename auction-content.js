@@ -130,8 +130,10 @@
   let customDefinitions = [];
   const STORAGE_KEY = SCHEMA.storageKeys.sortState;
   const FILTER_VALUES_STORAGE_KEY = MODEL.filterValuesStorageKey;
-  const PAGE_SCHEMA_SCRIPT_ID = "glad-ah-page-schema";
-  const PAGE_CORE_SCRIPT_ID = "glad-ah-page-core";
+  const PAGE_BRIDGE_REQUEST_SOURCE = CORE.constants.pageBridgeRequestSource || "glad-ah-extension";
+  const PAGE_BRIDGE_RESPONSE_SOURCE = CORE.constants.pageBridgeResponseSource || "glad-ah-page";
+  const PAGE_SCHEMA_SCRIPT_ID = `glad-ah-page-schema-${CORE.version || CONTENT_VERSION}`;
+  const PAGE_CORE_SCRIPT_ID = `glad-ah-page-core-${CORE.version || CONTENT_VERSION}`;
 
   const initialState = readSortState();
   let selectedSort = initialState.selectedSort;
@@ -253,7 +255,7 @@
       }, 60000);
 
       function onMessage(event) {
-        if (event.source !== window || event.data?.source !== "glad-ah-page" || event.data.id !== id) return;
+        if (event.source !== window || event.data?.source !== PAGE_BRIDGE_RESPONSE_SOURCE || event.data.id !== id) return;
 
         window.clearTimeout(timeout);
         window.removeEventListener("message", onMessage);
@@ -266,7 +268,7 @@
       }
 
       window.addEventListener("message", onMessage);
-      window.postMessage({ source: "glad-ah-extension", id, method, args }, "*");
+      window.postMessage({ source: PAGE_BRIDGE_REQUEST_SOURCE, id, method, args }, "*");
     });
   }
 

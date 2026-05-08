@@ -1,12 +1,15 @@
 (() => {
   const root = typeof globalThis !== "undefined" ? globalThis : window;
+  const CORE_VERSION = "auction-core-v3";
+  const PAGE_BRIDGE_REQUEST_SOURCE = "glad-ah-extension-v3";
+  const PAGE_BRIDGE_RESPONSE_SOURCE = "glad-ah-page-v3";
   const SCHEMA = root.GladiatusAuctionSchema;
   if (!SCHEMA) {
     if (!isAuctionPageUrl(root.document?.location?.href || root.location?.href || "")) return;
     throw new Error("GladiatusAuctionSchema must load before GladiatusAuctionCore.");
   }
 
-  if (root.GladiatusAuctionCore) {
+  if (root.GladiatusAuctionCore?.version === CORE_VERSION) {
     if (shouldInstallPageBridge()) {
       installPageBridge(root.GladiatusAuctionCore);
     }
@@ -318,6 +321,7 @@
 
     return {
       scannedAt: new Date().toISOString(),
+      parserVersion: CORE_VERSION,
       categoriesScanned: scannedCategories.length,
       categoryIdsScanned: scannedCategoryIds,
       scanWarnings,
@@ -518,6 +522,7 @@
       imageSrc: readIconImageSrc(icon),
       imageStyle: icon.getAttribute("style") || "",
       lines,
+      parserVersion: CORE_VERSION,
       level: parsed.level,
       itemValue: parsed.itemValue,
       stats: parsed.stats
@@ -575,10 +580,13 @@
   }
 
   const api = {
+    version: CORE_VERSION,
     constants: {
       statNames: STAT_NAMES,
       mainScanTypes: MAIN_SCAN_TYPES,
-      mercenaryEquipmentScanTypes: MERCENARY_EQUIPMENT_SCAN_TYPES
+      mercenaryEquipmentScanTypes: MERCENARY_EQUIPMENT_SCAN_TYPES,
+      pageBridgeRequestSource: PAGE_BRIDGE_REQUEST_SOURCE,
+      pageBridgeResponseSource: PAGE_BRIDGE_RESPONSE_SOURCE
     },
     isAuctionPage,
     parseInteger,
@@ -605,11 +613,12 @@
   }
 
   function installPageBridge(coreApi) {
-    if (window.__GladiatusAuctionCoreBridgeInstalled) return;
+    if (window.__GladiatusAuctionCoreBridgeVersion === CORE_VERSION) return;
     window.__GladiatusAuctionCoreBridgeInstalled = true;
+    window.__GladiatusAuctionCoreBridgeVersion = CORE_VERSION;
 
     window.addEventListener("message", async (event) => {
-      if (event.source !== window || event.data?.source !== "glad-ah-extension" || !event.data?.id) return;
+      if (event.source !== window || event.data?.source !== PAGE_BRIDGE_REQUEST_SOURCE || !event.data?.id) return;
 
       const { id, method, args = [] } = event.data;
       try {
@@ -618,12 +627,12 @@
         }
 
         const result = await coreApi[method](...args);
-        window.postMessage({ source: "glad-ah-page", id, ok: true, result }, "*");
+        window.postMessage({ source: PAGE_BRIDGE_RESPONSE_SOURCE, id, ok: true, result }, "*");
       } catch (error) {
-        window.postMessage({ source: "glad-ah-page", id, ok: false, error: error.message || String(error) }, "*");
+        window.postMessage({ source: PAGE_BRIDGE_RESPONSE_SOURCE, id, ok: false, error: error.message || String(error) }, "*");
       }
     });
 
-    window.postMessage({ source: "glad-ah-page", type: "ready" }, "*");
+    window.postMessage({ source: PAGE_BRIDGE_RESPONSE_SOURCE, type: "ready", version: CORE_VERSION }, "*");
   }
 })();

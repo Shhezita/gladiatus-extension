@@ -51,7 +51,10 @@ async function init() {
   state.activeTab = await getActiveTab();
   state.pageMode = detectPageMode(state.activeTab?.url);
   state.popupState = normalizePopupState(await loadStorage(POPUP_STATE_KEY));
-  state.scanResult = await loadStorage(SCAN_STORAGE_KEY);
+  state.scanResult = normalizeScanResult(await loadStorage(SCAN_STORAGE_KEY));
+  if (state.scanResult) {
+    await saveStorage(SCAN_STORAGE_KEY, state.scanResult);
+  }
   state.arenaResult = await loadStorage(ARENA.resultsStorageKey);
   state.filterValuesByView = MODEL.normalizeAllFilterValues(await loadStorage(FILTER_VALUES_STORAGE_KEY) || state.popupState.filterByView);
   await saveStorage(FILTER_VALUES_STORAGE_KEY, state.filterValuesByView);

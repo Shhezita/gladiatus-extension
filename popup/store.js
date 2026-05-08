@@ -1,6 +1,7 @@
 import {
   ARENA,
   AUCTION_CONTENT_MESSAGES,
+  CORE,
   MODEL,
   SCHEMA,
   getActiveTab,
@@ -89,16 +90,37 @@ export async function persistArenaFormulas() {
 }
 
 export function normalizeScanResult(result) {
-  const items = sortScanItems(result?.items || []);
+  if (!result || typeof result !== "object") return null;
+
+  const items = sortScanItems((result.items || []).map(normalizeScanItem));
   const categoryIds = new Set(items.map((item) => item.categoryId).filter(Boolean));
 
   return {
     ...result,
+    parserVersion: CORE.version || result.parserVersion || "",
     categoriesScanned: categoryIds.size || result?.categoriesScanned || 0,
     categoryIdsScanned: result?.categoryIdsScanned || Array.from(categoryIds),
     scanWarnings: result?.scanWarnings || [],
     items
   };
+}
+
+export function normalizeScanItem(item) {
+  if (!item || typeof item !== "object") return item;
+  if (!Array.isArray(item.lines) || !item.lines.length) return item;
+
+  try {
+    const parsed = CORE.parseStats(item.lines);
+    return {
+      ...item,
+      parserVersion: CORE.version || item.parserVersion || "",
+      level: parsed.level || item.level || 0,
+      itemValue: parsed.itemValue || item.itemValue || 0,
+      stats: parsed.stats || item.stats || {}
+    };
+  } catch {
+    return item;
+  }
 }
 
 export function sortScanItems(items) {

@@ -231,6 +231,12 @@ function makeElement(tagName) {
 const { schema, score, model, core, arena } = loadGlobals();
 
 {
+  assert.equal(core.version, "auction-core-v3");
+  assert.equal(core.constants.pageBridgeRequestSource, "glad-ah-extension-v3");
+  assert.equal(core.constants.pageBridgeResponseSource, "glad-ah-page-v3");
+}
+
+{
   const manifest = JSON.parse(fs.readFileSync(path.join(rootDir, "manifest.json"), "utf8"));
   const mainEntry = manifest.content_scripts.find((entry) => entry.world === "MAIN");
   const isolatedEntries = manifest.content_scripts.filter((entry) => entry.world !== "MAIN");
@@ -262,6 +268,7 @@ const { schema, score, model, core, arena } = loadGlobals();
   }
 
   const popupHtml = fs.readFileSync(path.join(rootDir, "popup.html"), "utf8");
+  assert.match(popupHtml, /<script\s+src="auction-core\.js"><\/script>/);
   assert.match(popupHtml, /<script\s+type="module"\s+src="popup\.js"><\/script>/);
 }
 
@@ -323,6 +330,55 @@ const { schema, score, model, core, arena } = loadGlobals();
 {
   assert.equal(core.parseSignedBonus("Agility +10% (+11)"), 11);
   assert.equal(core.parseSignedBonus("Agility +10%"), 0);
+  assert.equal(core.parseSignedBonus("Dexterity +32% (+28),+4% (+4)"), 28);
+}
+
+{
+  const parsed = core.parseStats([
+    "Táliths Gladiator helmet of Martial Arts",
+    "Damage +7",
+    "Armour +813",
+    "Strength +1",
+    "Strength +20% (+9)",
+    "Dexterity +20% (+18)",
+    "Charisma +2",
+    "Charisma +10% (+7)",
+    "Critical attack value +7",
+    "Level 64",
+    "Value 4506"
+  ]);
+  const item = { viewId: "armor", stats: parsed.stats };
+  const preset = model.getPreset("armor", "main").preset;
+
+  assert.equal(parsed.stats.damageBonus, 7);
+  assert.equal(parsed.stats.strength, 10);
+  assert.equal(parsed.stats.dexterity, 18);
+  assert.equal(parsed.stats.charisma, 9);
+  assert.equal(parsed.stats.criticalattackvalue, 7);
+  assert.equal(preset.score(item), 82);
+}
+
+{
+  const parsed = core.parseStats([
+    "Kerrannas Leather cap of Elimination",
+    "Armour +443",
+    "Strength +46% (+21)",
+    "Dexterity +50% (+45)",
+    "Agility +22% (+25)",
+    "Charisma +4",
+    "Critical attack value +10",
+    "Level 67",
+    "Value 4525"
+  ]);
+  const item = { viewId: "armor", stats: parsed.stats };
+  const preset = model.getPreset("armor", "main").preset;
+
+  assert.equal(parsed.stats.strength, 21);
+  assert.equal(parsed.stats.dexterity, 45);
+  assert.equal(parsed.stats.agility, 25);
+  assert.equal(parsed.stats.charisma, 4);
+  assert.equal(parsed.stats.criticalattackvalue, 10);
+  assert.equal(preset.score(item), 86.8);
 }
 
 {

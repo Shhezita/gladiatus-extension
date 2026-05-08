@@ -80,12 +80,8 @@
     sections: {
       duel: {
         terms: [
-          { stat: "strength", weight: 1 },
           { stat: "dexterity", weight: 1 },
           { stat: "agility", weight: 1 },
-          { stat: "constitution", weight: 1 },
-          { stat: "charisma", weight: 1 },
-          { stat: "intelligence", weight: 1 },
           { stat: "damageAvg", weight: 1 }
         ],
         constraints: []
@@ -93,7 +89,7 @@
       tank: {
         terms: [
           { stat: "agility", weight: 1 },
-          { stat: "strength", weight: 1 },
+          { stat: "strength", weight: 0.5 },
           { stat: "armour", weight: 0.01 }
         ],
         constraints: []

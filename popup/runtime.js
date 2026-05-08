@@ -1,10 +1,11 @@
 export const SCHEMA = window.GladiatusAuctionSchema;
 export const SCORE = window.GladiatusScoreModel;
 export const MODEL = window.GladiatusAuctionModel;
+export const CORE = window.GladiatusAuctionCore;
 export const ARENA = window.GladiatusArenaCore;
 
-if (!SCHEMA || !SCORE || !MODEL || !ARENA) {
-  throw new Error("Gladiatus auction schema, score model, auction model, and arena core must load before the popup.");
+if (!SCHEMA || !SCORE || !MODEL || !CORE || !ARENA) {
+  throw new Error("Gladiatus auction schema, score model, auction model, auction core, and arena core must load before the popup.");
 }
 
 export const AUCTION_CONTENT_MESSAGES = {
