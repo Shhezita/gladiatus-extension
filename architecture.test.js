@@ -95,6 +95,7 @@ function loadGlobals() {
 
 function makeBackgroundScannerContext(options = {}) {
   const storage = options.storage || {};
+  const setCalls = options.setCalls || [];
   const context = {
     console: { ...console, log() {}, warn() {} },
     URL,
@@ -122,6 +123,7 @@ function makeBackgroundScannerContext(options = {}) {
             return { ...storage };
           },
           async set(values) {
+            setCalls.push(JSON.parse(JSON.stringify(values || {})));
             Object.assign(storage, values || {});
           }
         }
@@ -139,7 +141,8 @@ function makeBackgroundScannerContext(options = {}) {
   return {
     arena: context.GladiatusArenaCore,
     scanner: context.GladiatusArenaBackgroundScanner,
-    storage
+    storage,
+    setCalls
   };
 }
 
@@ -355,6 +358,7 @@ const { schema, score, model, core, arena } = loadGlobals();
 {
   const manifest = JSON.parse(fs.readFileSync(path.join(rootDir, "manifest.json"), "utf8"));
   const backgroundSource = fs.readFileSync(path.join(rootDir, "background.js"), "utf8");
+  const arenaScanSource = fs.readFileSync(path.join(rootDir, "arena-scan.js"), "utf8");
   const mainEntry = manifest.content_scripts.find((entry) => entry.world === "MAIN");
   const isolatedEntries = manifest.content_scripts.filter((entry) => entry.world !== "MAIN");
 
@@ -378,6 +382,10 @@ const { schema, score, model, core, arena } = loadGlobals();
     "arena-content.js"
   ]);
   assert.ok(isolatedEntries[0].js.indexOf("arena-scan.js") < isolatedEntries[0].js.indexOf("arena-content.js"));
+  assert.match(arenaScanSource, /const STATUS_BOX_ID = "glad-arena-passive-status"/);
+  assert.match(arenaScanSource, /function shouldRenderStatusBox/);
+  assert.match(arenaScanSource, /return isGladiatusGamePage\(url\);/);
+  assert.match(arenaScanSource, /chrome\.storage\.onChanged\.addListener/);
   assert.equal(fs.existsSync(path.join(rootDir, "content.js")), false);
 
   const referencedFiles = [
@@ -769,6 +777,7 @@ const { schema, score, model, core, arena } = loadGlobals();
 
 {
   assert.equal(arena.passiveScansStorageKey, "glad-arena-passive-scans-v1");
+  assert.equal(arena.scanStatusStorageKey, "glad-arena-scan-status-v1");
 }
 
 function arenaListFixture({ aType = "2", players = [] } = {}) {
@@ -867,7 +876,9 @@ async function runBackgroundScannerTests() {
     default: profileFixture("Fallback")
   };
   const calls = [];
+  const setCalls = [];
   const { arena: backgroundArena, scanner, storage } = makeBackgroundScannerContext({
+    setCalls,
     fetch: backgroundFetchFixture({ singleList, teamList, profileHtmls, calls })
   });
 
@@ -893,13 +904,25 @@ async function runBackgroundScannerTests() {
   await scanner.forceScan({ url: teamArenaUrl, entries: teamEntries });
 
   const cacheKey = backgroundArena.passiveScansStorageKey;
+  const statusKey = backgroundArena.scanStatusStorageKey;
   assert.equal(storage[cacheKey].single.result.arenaKind, "single");
   assert.equal(storage[cacheKey].team.result.arenaKind, "team");
   assert.equal(storage[cacheKey].single.result.opponents[0].opponent.id, "111");
   assert.equal(storage[cacheKey].team.result.opponents[0].opponent.id, "222");
+  assert.equal(storage[statusKey].single.state, "ready");
+  assert.equal(storage[statusKey].team.state, "ready");
+  assert.equal(storage[statusKey].single.profileTotal, 1);
+  assert.equal(storage[statusKey].team.profileTotal, 6);
+
+  const teamProgressWrites = setCalls
+    .map((call) => call[statusKey]?.team)
+    .filter((record) => record?.state === "scanning");
+  assert.ok(teamProgressWrites.some((record) => record.opponentTotal === 1 && record.profileTotal === 6 && record.profileDone > 0));
+  assert.ok(teamProgressWrites.some((record) => /opponents \d+\/1/.test(record.message)));
 
   const quiet = await scanner.passiveCheck({ url: singleArenaUrl, preferredKind: "single" });
   assert.equal(quiet.find((result) => result.kind === "single").skipped, "quiet");
+  assert.equal(storage[statusKey].single.message, "Ready, quiet phase");
 
   const old = new Date(Date.now() - 11 * 60 * 1000).toISOString();
   storage[cacheKey].single.scannedAt = old;
@@ -909,12 +932,44 @@ async function runBackgroundScannerTests() {
   const unchanged = await scanner.passiveCheck({ url: singleArenaUrl, preferredKind: "single" });
   assert.equal(unchanged.find((result) => result.kind === "single").skipped, "unchanged");
   assert.equal(calls.filter(isProfileFetch).length, profileCallsBeforeUnchanged);
+  assert.equal(storage[statusKey].single.message, "Ready, opponent list unchanged");
+
+  const fresh = await scanner.passiveCheck({ url: singleArenaUrl, preferredKind: "single" });
+  assert.equal(fresh.find((result) => result.kind === "single").skipped, "fresh");
+  assert.equal(storage[statusKey].single.message, "Ready, checked recently");
 
   const changedEntries = scanner.readArenaOpponentEntriesFromHtml(changedSingleList, singleArenaUrl);
   const profileCallsBeforeVisible = calls.filter(isProfileFetch).length;
   await scanner.ensureVisibleScan({ url: singleArenaUrl, entries: changedEntries });
   assert.ok(calls.filter(isProfileFetch).length > profileCallsBeforeVisible);
   assert.equal(storage[cacheKey].single.result.opponents[0].opponent.id, "333");
+
+  const errorStorage = {
+    [cacheKey]: {
+      single: {
+        listUrl: singleArenaUrl,
+        checkedAt: old,
+        scannedAt: old,
+        fingerprint: "old",
+        formulaFingerprint: "old",
+        result: { scannedAt: old, opponentCount: 1 }
+      },
+      team: {}
+    }
+  };
+  const errorContext = makeBackgroundScannerContext({
+    storage: errorStorage,
+    fetch: async () => ({
+      ok: false,
+      status: 503,
+      async text() {
+        return "";
+      }
+    })
+  });
+  await errorContext.scanner.passiveCheck({ url: singleArenaUrl, preferredKind: "single" });
+  assert.equal(errorStorage[statusKey].single.state, "error");
+  assert.equal(errorStorage[statusKey].single.message, "Error fetching list");
 }
 
 runBackgroundScannerTests()

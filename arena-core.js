@@ -11,6 +11,7 @@
   const FORMULAS_STORAGE_KEY = "glad-arena-formulas-v1";
   const RESULTS_STORAGE_KEY = "glad-arena-last-scan-v1";
   const PASSIVE_SCANS_STORAGE_KEY = "glad-arena-passive-scans-v1";
+  const SCAN_STATUS_STORAGE_KEY = "glad-arena-scan-status-v1";
   const TEAM_DOLL_MIN = 2;
   const TEAM_DOLL_MAX = 6;
 
@@ -584,6 +585,7 @@
     formulasStorageKey: FORMULAS_STORAGE_KEY,
     passiveScansStorageKey: PASSIVE_SCANS_STORAGE_KEY,
     resultsStorageKey: RESULTS_STORAGE_KEY,
+    scanStatusStorageKey: SCAN_STATUS_STORAGE_KEY,
     arenaOpponentFingerprint,
     formatArenaFormula: summarizeArenaFormula,
     formatCharacterStats,

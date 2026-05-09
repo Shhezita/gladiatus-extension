@@ -10,9 +10,14 @@
   const LOCK_TIMEOUT_MS = 5 * 60 * 1000;
   const MANUAL_SCAN_DELAY_MS = 150;
   const PASSIVE_SCAN_DELAY_MS = 900;
+  const SCAN_CONCURRENCY = 2;
   const RETRYABLE_PROFILE_STATUSES = new Set([429, 500, 502, 503, 504]);
   const LOG_PREFIX = "[Gladiatus Background Scanner]";
   const KINDS = ["team", "single"];
+  const KIND_LABELS = {
+    single: "Arena",
+    team: "Circus"
+  };
 
   function isGladiatusGamePage(url) {
     try {
@@ -32,6 +37,10 @@
     const first = KINDS.includes(preferredKind) ? preferredKind : currentArenaKind(url);
     const order = first ? [first, ...KINDS.filter((kind) => kind !== first)] : ["team", "single"];
     return order.filter((kind, index) => order.indexOf(kind) === index);
+  }
+
+  function kindLabel(kind) {
+    return KIND_LABELS[kind] || kind;
   }
 
   function arenaListCandidates(kind, currentUrl = "", storedUrl = "") {
@@ -89,6 +98,7 @@
       sourceUrl: url,
       checkedAt: new Date().toISOString(),
       delayMs: MANUAL_SCAN_DELAY_MS,
+      concurrency: SCAN_CONCURRENCY,
       acquireLock: true,
       scanSource: "visible",
       updateLastResult: true
@@ -105,6 +115,7 @@
       listUrl: url,
       sourceUrl: url,
       delayMs: MANUAL_SCAN_DELAY_MS,
+      concurrency: SCAN_CONCURRENCY,
       acquireLock: true,
       scanSource: "manual",
       updateLastResult: true
@@ -114,27 +125,72 @@
 
   async function checkPassiveKind(kind, formula, options = {}) {
     log("checking scan cache", { kind });
+    await updateScanStatus(kind, {
+      state: "checking",
+      source: "passive",
+      message: `Checking ${kindLabel(kind)} scan cache`,
+      lastError: ""
+    });
     const cache = await loadPassiveCache();
     const record = cache[kind] || {};
     const candidates = arenaListCandidates(kind, options.url || "", record.listUrl);
     log("arena list candidates", { kind, urls: candidates.map(safeUrl), stored: Boolean(record.listUrl) });
-    if (!candidates.length) return { kind, skipped: "missing-url" };
+    if (!candidates.length) {
+      await updateScanStatus(kind, {
+        state: "skipped",
+        source: "passive",
+        message: "No list URL yet",
+        checkedAt: record.checkedAt || "",
+        scannedAt: record.scannedAt || record.result?.scannedAt || "",
+        lastError: ""
+      });
+      return { kind, skipped: "missing-url" };
+    }
 
     const now = Date.now();
     const scannedAt = Date.parse(record.scannedAt || record.result?.scannedAt || "");
     const checkedAt = Date.parse(record.checkedAt || "");
     if (!options.force && record.result && Number.isFinite(scannedAt) && now - scannedAt < FULL_SCAN_QUIET_MS) {
       log("skip scan; full scan is still inside quiet period", { kind, scannedAt: record.scannedAt || record.result?.scannedAt });
+      await updateScanStatus(kind, {
+        state: "ready",
+        source: "passive",
+        message: "Ready, quiet phase",
+        checkedAt: record.checkedAt || "",
+        scannedAt: record.scannedAt || record.result?.scannedAt || "",
+        opponentDone: record.result?.opponentCount || 0,
+        opponentTotal: record.result?.opponentCount || 0,
+        profileDone: defaultProfileTotal(kind, record.result?.opponentCount || 0),
+        profileTotal: defaultProfileTotal(kind, record.result?.opponentCount || 0),
+        lastError: ""
+      });
       return { kind, skipped: "quiet" };
     }
     if (!options.force && Number.isFinite(checkedAt) && now - checkedAt < LIST_CHECK_INTERVAL_MS) {
       log("skip list check; checked recently", { kind, checkedAt: record.checkedAt });
+      await updateScanStatus(kind, {
+        state: record.result ? "ready" : "skipped",
+        source: "passive",
+        message: record.result ? "Ready, checked recently" : "Checked recently",
+        checkedAt: record.checkedAt || "",
+        scannedAt: record.scannedAt || record.result?.scannedAt || "",
+        opponentDone: record.result?.opponentCount || 0,
+        opponentTotal: record.result?.opponentCount || 0,
+        profileDone: defaultProfileTotal(kind, record.result?.opponentCount || 0),
+        profileTotal: defaultProfileTotal(kind, record.result?.opponentCount || 0),
+        lastError: ""
+      });
       return { kind, skipped: "fresh" };
     }
 
     const lockId = await acquirePassiveLock(kind, now);
     if (!lockId) {
       log("skip scan; another scan is in flight", { kind });
+      await updateLockedStatus(kind, {
+        source: "passive",
+        checkedAt: record.checkedAt || "",
+        scannedAt: record.scannedAt || record.result?.scannedAt || ""
+      });
       return { kind, skipped: "locked" };
     }
 
@@ -143,9 +199,29 @@
       for (const listUrl of candidates) {
         try {
           log("fetch arena page", { kind, url: safeUrl(listUrl) });
+          await updateScanStatus(kind, {
+            state: "checking",
+            source: "passive",
+            message: "Checking opponent list",
+            checkedAt: record.checkedAt || "",
+            scannedAt: record.scannedAt || record.result?.scannedAt || "",
+            lastError: ""
+          });
           const html = await fetchArenaListHtml(listUrl);
           const entries = readArenaOpponentEntriesFromHtml(html, listUrl);
           log("got player list", { kind, url: safeUrl(listUrl), count: entries.length });
+          await updateScanStatus(kind, {
+            state: "checking",
+            source: "passive",
+            message: entries.length ? `Checked opponent list: ${entries.length} opponents` : "Checked opponent list: no opponents found",
+            checkedAt: new Date().toISOString(),
+            scannedAt: record.scannedAt || record.result?.scannedAt || "",
+            opponentDone: 0,
+            opponentTotal: entries.length,
+            profileDone: 0,
+            profileTotal: defaultProfileTotal(kind, entries.length),
+            lastError: ""
+          });
           if (!entries.length) continue;
 
           const ensured = await ensureScanForEntries(entries, formula, {
@@ -155,6 +231,7 @@
             checkedAt: new Date().toISOString(),
             fingerprint: ARENA.arenaOpponentFingerprint(entries),
             delayMs: PASSIVE_SCAN_DELAY_MS,
+            concurrency: SCAN_CONCURRENCY,
             lockId,
             scanSource: "passive-list",
             updateLastResult: currentArenaKind(options.url) === kind
@@ -173,6 +250,14 @@
         checkedAt: new Date().toISOString(),
         lastError
       }));
+      await updateScanStatus(kind, {
+        state: "skipped",
+        source: "passive",
+        message: "No opponent rows found",
+        checkedAt: new Date().toISOString(),
+        scannedAt: record.scannedAt || record.result?.scannedAt || "",
+        lastError
+      });
       log("no opponents found in arena page candidates", { kind, lastError });
       return { kind, skipped: "no-opponents" };
     } catch (error) {
@@ -182,13 +267,32 @@
         checkedAt: new Date().toISOString(),
         lastError: message
       }));
+      await updateScanStatus(kind, {
+        state: "error",
+        source: "passive",
+        message: "Error fetching list",
+        checkedAt: new Date().toISOString(),
+        scannedAt: record.scannedAt || record.result?.scannedAt || "",
+        lastError: message
+      });
       log("passive scan failed", { kind, error: message });
       return { kind, error: message };
     }
   }
 
   async function ensureScanForEntries(entries, rawFormula, options = {}) {
-    if (!entries?.length) return { result: null, skipped: "empty" };
+    if (!entries?.length) {
+      if (options.kind) {
+        await updateScanStatus(options.kind, {
+          state: "skipped",
+          source: options.scanSource || "unknown",
+          message: "No opponent rows found",
+          checkedAt: options.checkedAt || "",
+          lastError: ""
+        });
+      }
+      return { result: null, skipped: "empty" };
+    }
 
     const formula = ARENA.normalizeArenaFormula(rawFormula) || ARENA.defaultArenaFormula();
     const kind = options.kind || entries[0]?.opponent?.arenaKind || "single";
@@ -213,6 +317,18 @@
         });
       }
       if (options.updateLastResult !== false) await saveLastResult(record.result);
+      await updateScanStatus(kind, {
+        state: "ready",
+        source: options.scanSource || "unknown",
+        message: options.scanSource === "passive-list" ? "Ready, opponent list unchanged" : "Ready, cache matches opponent list",
+        checkedAt,
+        scannedAt: record.scannedAt || record.result?.scannedAt || "",
+        opponentDone: record.result?.opponentCount || entries.length,
+        opponentTotal: record.result?.opponentCount || entries.length,
+        profileDone: defaultProfileTotal(kind, record.result?.opponentCount || entries.length),
+        profileTotal: defaultProfileTotal(kind, record.result?.opponentCount || entries.length),
+        lastError: ""
+      });
       log("scan data already matches opponent list", { kind, source: options.scanSource || "unknown", count: entries.length });
       return { result: record.result, skipped: "unchanged" };
     }
@@ -227,7 +343,14 @@
     if (options.acquireLock && !lockId) {
       lockId = await acquirePassiveLock(kind);
       ownsLock = Boolean(lockId);
-      if (!lockId) return { result: null, skipped: "locked" };
+      if (!lockId) {
+        await updateLockedStatus(kind, {
+          source: options.scanSource || "unknown",
+          checkedAt: record.checkedAt || "",
+          scannedAt: record.scannedAt || record.result?.scannedAt || ""
+        });
+        return { result: null, skipped: "locked" };
+      }
     }
 
     try {
@@ -236,7 +359,9 @@
         arenaKind: kind,
         sourceUrl: options.sourceUrl || listUrl,
         fingerprint,
-        delayMs: Number(options.delayMs) || PASSIVE_SCAN_DELAY_MS
+        scanSource: options.scanSource || "unknown",
+        delayMs: Number(options.delayMs) || PASSIVE_SCAN_DELAY_MS,
+        concurrency: Number(options.concurrency) || SCAN_CONCURRENCY
       });
       await saveCachedResult(kind, {
         listUrl,
@@ -248,8 +373,30 @@
         lastError: ""
       });
       if (options.updateLastResult !== false) await saveLastResult(result);
+      await updateScanStatus(kind, {
+        state: "ready",
+        source: options.scanSource || "unknown",
+        message: "Ready",
+        checkedAt,
+        scannedAt: result.scannedAt,
+        opponentDone: result.opponentCount,
+        opponentTotal: result.opponentCount,
+        profileDone: defaultProfileTotal(kind, result.opponentCount),
+        profileTotal: defaultProfileTotal(kind, result.opponentCount),
+        lastError: ""
+      });
       log("saved scan result", { kind, source: options.scanSource || "unknown", opponents: result.opponentCount, failed: result.failedCount });
       return { result, scanned: true };
+    } catch (error) {
+      await updateScanStatus(kind, {
+        state: "error",
+        source: options.scanSource || "unknown",
+        message: "Scan failed",
+        checkedAt,
+        scannedAt: record.scannedAt || record.result?.scannedAt || "",
+        lastError: error.message || String(error)
+      });
+      throw error;
     } finally {
       if (ownsLock) await releasePassiveLock(kind, lockId, (current) => current);
     }
@@ -260,19 +407,57 @@
     const arenaKind = options.arenaKind || entries[0]?.opponent?.arenaKind || "single";
     const fingerprint = options.fingerprint || ARENA.arenaOpponentFingerprint(entries);
     const delayMs = Number(options.delayMs) || MANUAL_SCAN_DELAY_MS;
-    const opponents = [];
+    const concurrency = Math.max(1, Math.min(ARENA.parseInteger(options.concurrency) || SCAN_CONCURRENCY, entries.length));
+    const opponents = new Array(entries.length);
+    const progress = {
+      kind: arenaKind,
+      source: options.scanSource || "unknown",
+      opponentDone: 0,
+      opponentTotal: entries.length,
+      profileDone: 0,
+      profileTotal: defaultProfileTotal(arenaKind, entries.length)
+    };
+    let nextIndex = 0;
 
-    log("commence profile scanning", { kind: arenaKind, count: entries.length, delayMs, sourceUrl: safeUrl(options.sourceUrl || "") });
-    for (const entry of entries) {
-      log("scan opponent profile", {
-        kind: entry.opponent.arenaKind,
-        rowIndex: entry.opponent.rowIndex,
-        name: entry.opponent.name,
-        profileUrl: safeUrl(entry.opponent.profileUrl)
-      });
-      opponents.push(await scanOpponentEntry(entry, formula, { delayMs }));
-      await delay(delayMs);
+    log("commence profile scanning", { kind: arenaKind, count: entries.length, concurrency, delayMs, sourceUrl: safeUrl(options.sourceUrl || "") });
+    await updateScanStatus(arenaKind, {
+      state: "scanning",
+      source: progress.source,
+      message: scanProgressMessage(progress),
+      opponentDone: progress.opponentDone,
+      opponentTotal: progress.opponentTotal,
+      profileDone: progress.profileDone,
+      profileTotal: progress.profileTotal,
+      lastError: ""
+    });
+
+    async function worker() {
+      while (nextIndex < entries.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        const entry = entries[index];
+        log("scan opponent profile", {
+          kind: entry.opponent.arenaKind,
+          rowIndex: entry.opponent.rowIndex,
+          name: entry.opponent.name,
+          profileUrl: safeUrl(entry.opponent.profileUrl)
+        });
+        opponents[index] = await scanOpponentEntry(entry, formula, { delayMs, progress });
+        progress.opponentDone += 1;
+        await updateScanStatus(arenaKind, {
+          state: "scanning",
+          source: progress.source,
+          message: scanProgressMessage(progress),
+          opponentDone: progress.opponentDone,
+          opponentTotal: progress.opponentTotal,
+          profileDone: progress.profileDone,
+          profileTotal: progress.profileTotal,
+          lastError: ""
+        });
+        if (progress.opponentDone < entries.length) await delay(delayMs);
+      }
     }
+    await Promise.all(Array.from({ length: concurrency }, () => worker()));
 
     const successful = opponents.filter((entry) => Number.isFinite(entry.score));
     const best = [...successful].sort((a, b) => a.score - b.score)[0] || null;
@@ -296,12 +481,16 @@
   }
 
   async function scanOpponentEntry(entry, formula, options = {}) {
+    let countedBaseProfile = false;
     try {
       const html = await fetchProfileHtml(entry.opponent.profileUrl);
+      await incrementProfileProgress(options.progress);
+      countedBaseProfile = true;
       return entry.opponent.arenaKind === "team"
         ? await scanTeamOpponent(entry, html, formula, options)
         : scanSingleOpponent(entry, html, formula);
     } catch (error) {
+      if (!countedBaseProfile) await incrementProfileProgress(options.progress);
       log("opponent profile scan failed", {
         name: entry.opponent.name,
         profileUrl: safeUrl(entry.opponent.profileUrl),
@@ -350,7 +539,12 @@
         role: tab.role,
         profileUrl: safeUrl(tab.url)
       });
-      const dollHtml = await fetchProfileHtml(tab.url);
+      let dollHtml = "";
+      try {
+        dollHtml = await fetchProfileHtml(tab.url);
+      } finally {
+        await incrementProfileProgress(options.progress);
+      }
       characters.push(parseCharacterFromHtml(dollHtml, {
         ...entry.opponent,
         profileUrl: tab.url,
@@ -604,6 +798,101 @@
 
   async function saveLastResult(result) {
     await chrome.storage.local.set({ [ARENA.resultsStorageKey]: result });
+  }
+
+  async function incrementProfileProgress(progress) {
+    if (!progress) return;
+    progress.profileDone = Math.min(progress.profileTotal, progress.profileDone + 1);
+    await updateScanStatus(progress.kind, {
+      state: "scanning",
+      source: progress.source,
+      message: scanProgressMessage(progress),
+      opponentDone: progress.opponentDone,
+      opponentTotal: progress.opponentTotal,
+      profileDone: progress.profileDone,
+      profileTotal: progress.profileTotal,
+      lastError: ""
+    });
+  }
+
+  function scanProgressMessage(progress) {
+    return progress.profileTotal
+      ? `Scanning profiles ${progress.profileDone}/${progress.profileTotal}, opponents ${progress.opponentDone}/${progress.opponentTotal}`
+      : "Scanning profiles";
+  }
+
+  function defaultProfileTotal(kind, countOrEntries) {
+    const count = Array.isArray(countOrEntries) ? countOrEntries.length : ARENA.parseInteger(countOrEntries);
+    return kind === "team" ? count * 6 : count;
+  }
+
+  async function updateScanStatus(kind, values = {}) {
+    if (!KINDS.includes(kind)) return null;
+    const status = await loadScanStatus();
+    status[kind] = normalizeScanStatusRecord({
+      ...(status[kind] || {}),
+      ...values,
+      kind,
+      updatedAt: new Date().toISOString()
+    }, kind);
+    await saveScanStatus(status);
+    return status[kind];
+  }
+
+  async function updateLockedStatus(kind, values = {}) {
+    if (!KINDS.includes(kind)) return null;
+    const status = await loadScanStatus();
+    const current = status[kind] || {};
+    if (current.state === "scanning" && Number(current.profileTotal) && Number(current.profileDone) < Number(current.profileTotal)) {
+      return current;
+    }
+    return updateScanStatus(kind, {
+      state: "scanning",
+      source: values.source || "unknown",
+      message: "Scan in progress",
+      checkedAt: values.checkedAt || current.checkedAt || "",
+      scannedAt: values.scannedAt || current.scannedAt || "",
+      opponentDone: current.opponentDone || 0,
+      opponentTotal: current.opponentTotal || 0,
+      profileDone: current.profileDone || 0,
+      profileTotal: current.profileTotal || 0,
+      lastError: ""
+    });
+  }
+
+  async function loadScanStatus() {
+    const result = await chrome.storage.local.get(ARENA.scanStatusStorageKey);
+    return normalizeScanStatus(result[ARENA.scanStatusStorageKey]);
+  }
+
+  async function saveScanStatus(status) {
+    await chrome.storage.local.set({ [ARENA.scanStatusStorageKey]: normalizeScanStatus(status) });
+  }
+
+  function normalizeScanStatus(status) {
+    const source = status && typeof status === "object" ? status : {};
+    return {
+      single: normalizeScanStatusRecord(source.single, "single"),
+      team: normalizeScanStatusRecord(source.team, "team")
+    };
+  }
+
+  function normalizeScanStatusRecord(record, kind) {
+    const source = record && typeof record === "object" ? record : {};
+    return {
+      kind,
+      state: String(source.state || "unknown"),
+      source: String(source.source || ""),
+      message: String(source.message || ""),
+      updatedAt: String(source.updatedAt || ""),
+      checkedAt: String(source.checkedAt || ""),
+      scannedAt: String(source.scannedAt || ""),
+      opponentDone: ARENA.parseInteger(source.opponentDone),
+      opponentTotal: ARENA.parseInteger(source.opponentTotal),
+      profileDone: ARENA.parseInteger(source.profileDone),
+      profileTotal: ARENA.parseInteger(source.profileTotal),
+      lastError: String(source.lastError || "")
+    };
   }
 
   function normalizeEntries(entries) {

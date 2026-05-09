@@ -168,3 +168,107 @@ tr.glad-arena-best > td {
 #glad-arena-scanner .glad-arena-status-error {
   color: #ffb4a8;
 }
+
+#glad-arena-passive-status {
+  background: #24180f;
+  border: 1px solid #7b5b32;
+  color: #f3ddb2;
+  display: grid;
+  gap: 4px;
+  margin: 8px 0;
+  max-width: 520px;
+  padding: 7px 8px;
+}
+
+.glad-arena-passive-status-row {
+  display: grid;
+  gap: 3px 8px;
+  grid-template-columns: 46px minmax(0, 1fr);
+  line-height: 1.25;
+}
+
+.glad-arena-passive-status-row strong {
+  color: #ffd98a;
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.glad-arena-passive-status-message {
+  color: #c8aa74;
+  display: block;
+  grid-column: 1 / -1;
+  grid-row: 2;
+  overflow-wrap: anywhere;
+}
+
+.glad-arena-passive-status-badge {
+  align-items: center;
+  background: #3b2817;
+  border: 1px solid #7b5b32;
+  color: #c8aa74;
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 700;
+  gap: 4px;
+  justify-content: center;
+  justify-self: start;
+  grid-column: 2;
+  grid-row: 1;
+  line-height: 1;
+  min-width: 34px;
+  padding: 3px 5px;
+  text-align: center;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.glad-arena-passive-status-badge::before {
+  background: #8b7652;
+  border-radius: 50%;
+  content: "";
+  display: inline-block;
+  height: 6px;
+  width: 6px;
+}
+
+.glad-arena-passive-status-scanning .glad-arena-passive-status-message,
+.glad-arena-passive-status-checking .glad-arena-passive-status-message {
+  color: #ffe6ae;
+}
+
+.glad-arena-passive-status-ready .glad-arena-passive-status-message {
+  color: #d9c58d;
+}
+
+.glad-arena-passive-status-error .glad-arena-passive-status-message {
+  color: #ffb4a8;
+}
+
+.glad-arena-passive-status-ready .glad-arena-passive-status-badge {
+  border-color: #7f9654;
+  color: #d9e7a4;
+}
+
+.glad-arena-passive-status-ready .glad-arena-passive-status-badge::before {
+  background: #8fb35a;
+}
+
+.glad-arena-passive-status-scanning .glad-arena-passive-status-badge,
+.glad-arena-passive-status-checking .glad-arena-passive-status-badge {
+  border-color: #b98943;
+  color: #ffe6ae;
+}
+
+.glad-arena-passive-status-scanning .glad-arena-passive-status-badge::before,
+.glad-arena-passive-status-checking .glad-arena-passive-status-badge::before {
+  background: #d7a64e;
+}
+
+.glad-arena-passive-status-error .glad-arena-passive-status-badge {
+  border-color: #9d3f32;
+  color: #ffb4a8;
+}
+
+.glad-arena-passive-status-error .glad-arena-passive-status-badge::before {
+  background: #d5685d;
+}

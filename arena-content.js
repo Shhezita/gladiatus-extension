@@ -243,6 +243,7 @@
       const formula = arenaFormulas.find((candidate) => candidate.id === select.value) || getSelectedFormula();
       await saveSelectedFormulaId(formula.id);
       const result = await scanOpponents(formula);
+      if (!result) throw new Error("Scan is already running. Wait for the current scan to finish.");
       await saveArenaResult(result);
 
       setPanelStatus(status, resultStatusText(result, "Best"), false);
@@ -253,6 +254,7 @@
   }
 
   function resultStatusText(result, prefix) {
+    if (!result) return "Scan is already running";
     const failed = result.failedCount ? `, ${result.failedCount} failed` : "";
     return result.bestName
       ? `${prefix}: ${result.bestName} (${ARENA.formatNumber(result.bestScore)})${failed}`
