@@ -24,6 +24,14 @@
     "intelligence"
   ];
 
+  const COSTUME_TIERS = {
+    11: "Easy",
+    12: "Medium",
+    13: "Hard"
+  };
+
+  const COSTUME_PATTERN = /\/costumes\/sets\/(?:male|female)\/(\d+)_complete\.png/;
+
   const ARENA_STAT_LABELS = {
     level: "Level",
     strength: "Str",
@@ -124,6 +132,7 @@
       this.role = normalizeRole(data.role);
       this.roleLabel = String(data.roleLabel || ROLE_SECTION_LABELS[this.role] || this.role);
       this.stats = normalizeStats({ ...(data.stats || {}), level: this.level });
+      this.costume = data.costume || null;
     }
 
     get primaryStatSum() {
@@ -150,6 +159,7 @@
         role: this.role,
         roleLabel: this.roleLabel,
         stats: { ...this.stats },
+        costume: this.costume || null,
         scores: characterScores(this)
       };
     }
@@ -246,6 +256,7 @@
     const damage = parseDamageRange(doc.querySelector(PROFILE_SELECTORS.damage)?.textContent || "");
     const name = doc.querySelector(".playername")?.textContent?.trim() || meta.name || activeDoll.name;
     const level = stat("level") || meta.level;
+    const costume = meta.costume || parseCostumeFromDocument(doc);
 
     return new ArenaCharacter({
       ...meta,
@@ -254,6 +265,7 @@
       doll: meta.doll || activeDoll.doll,
       role: meta.role || activeDoll.role,
       roleLabel: meta.roleLabel || activeDoll.roleLabel,
+      costume,
       stats: {
         level,
         strength: stat("strength"),
@@ -267,6 +279,26 @@
         ...damage
       }
     });
+  }
+
+  function parseCostumeFromDocument(doc) {
+    const el = doc.querySelector(".avatar_costume_animation");
+    if (!el) return null;
+    const bg = el.style?.backgroundImage || el.getAttribute("style") || "";
+    const match = bg.match(COSTUME_PATTERN);
+    if (!match) return null;
+    const setId = Number(match[1]);
+    const tier = COSTUME_TIERS[setId];
+    return tier ? { setId, tier } : null;
+  }
+
+  function parseCostumeFromHtml(html) {
+    const source = String(html || "");
+    const costumeMatch = source.match(/avatar_costume_animation[^>]*style\s*=\s*["'][^"']*\/costumes\/sets\/(?:male|female)\/(\d+)_complete\.png/);
+    if (!costumeMatch) return null;
+    const setId = Number(costumeMatch[1]);
+    const tier = COSTUME_TIERS[setId];
+    return tier ? { setId, tier } : null;
   }
 
   function readActiveDollMeta(doc, baseUrl = "") {
@@ -581,6 +613,7 @@
   root.GladiatusArenaCore = {
     ArenaCharacter,
     arenaKindFromUrl,
+    costumeTiers: COSTUME_TIERS,
     defaultArenaFormula,
     formulasStorageKey: FORMULAS_STORAGE_KEY,
     passiveScansStorageKey: PASSIVE_SCANS_STORAGE_KEY,
@@ -595,6 +628,8 @@
     normalizeArenaFormulas,
     parseCharacterFromDocument,
     parseCharacterFromHtml,
+    parseCostumeFromDocument,
+    parseCostumeFromHtml,
     parseDamageRange,
     parseFightArgs,
     parseInteger,

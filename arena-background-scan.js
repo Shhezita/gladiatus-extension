@@ -530,6 +530,7 @@
     log("read circus team tabs", { name: entry.opponent.name, count: tabs.length });
     if (!tabs.length) throw new Error("Could not find Circus team tabs on profile.");
 
+    const baseCostume = ARENA.parseCostumeFromHtml(html);
     const delayMs = Number(options.delayMs) || MANUAL_SCAN_DELAY_MS;
     const characters = [];
     for (const tab of tabs) {
@@ -550,7 +551,8 @@
         profileUrl: tab.url,
         doll: tab.doll,
         role: tab.role,
-        roleLabel: tab.roleLabel
+        roleLabel: tab.roleLabel,
+        costume: baseCostume
       }));
       await delay(delayMs);
     }
@@ -562,6 +564,7 @@
       displayName: entry.opponent.name,
       score: team.totalScore,
       matches: team.matches,
+      costume: baseCostume,
       team
     };
   }
@@ -632,6 +635,7 @@
     const damage = ARENA.parseDamageRange(textById(html, "char_schaden"));
     const name = textByClass(html, "playername").trim() || meta.name || activeDoll.name;
     const level = stat("char_level") || meta.level;
+    const costume = meta.costume || ARENA.parseCostumeFromHtml(html);
 
     return new ARENA.ArenaCharacter({
       ...meta,
@@ -640,6 +644,7 @@
       doll: meta.doll || activeDoll.doll,
       role: meta.role || activeDoll.role,
       roleLabel: meta.roleLabel || activeDoll.roleLabel,
+      costume,
       stats: {
         level,
         strength: stat("char_f0"),

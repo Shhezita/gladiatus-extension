@@ -272,3 +272,36 @@ tr.glad-arena-best > td {
 .glad-arena-passive-status-error .glad-arena-passive-status-badge::before {
   background: #d5685d;
 }
+
+/* Costume tier badges */
+.glad-arena-costume {
+  border-radius: 3px;
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  line-height: 1;
+  margin-left: 5px;
+  padding: 2px 5px;
+  text-transform: uppercase;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.glad-arena-costume-easy {
+  background: rgba(50, 120, 50, 0.35);
+  border: 1px solid #5ea55e;
+  color: #b4e8b4;
+}
+
+.glad-arena-costume-medium {
+  background: rgba(160, 120, 30, 0.35);
+  border: 1px solid #c8a43a;
+  color: #ffe6a1;
+}
+
+.glad-arena-costume-hard {
+  background: rgba(160, 50, 40, 0.35);
+  border: 1px solid #c5504a;
+  color: #ffb4a8;
+}

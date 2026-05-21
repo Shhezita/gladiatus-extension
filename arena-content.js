@@ -160,6 +160,15 @@
       }
 
       targetCell.append(badge);
+
+      const costume = result.character?.costume || result.costume || null;
+      if (costume?.tier) {
+        const costumeBadge = document.createElement("span");
+        costumeBadge.className = `glad-arena-costume glad-arena-costume-${costume.tier.toLowerCase()}`;
+        costumeBadge.textContent = costume.tier;
+        costumeBadge.title = `Costume set ${costume.setId} (${costume.tier})`;
+        targetCell.append(costumeBadge);
+      }
     }
   }
 
@@ -174,6 +183,7 @@
 
   function clearArenaBadges() {
     document.querySelectorAll(`.${BADGE_CLASS}`).forEach((badge) => badge.remove());
+    document.querySelectorAll(".glad-arena-costume").forEach((badge) => badge.remove());
     document.querySelectorAll(`.${BEST_CLASS}`).forEach((row) => row.classList.remove(BEST_CLASS));
   }
 
