@@ -1,4 +1,4 @@
-importScripts("score-model.js", "arena-core.js", "arena-background-scan.js");
+importScripts("score-model.js", "arena-core.js", "arena-simulator.js", "arena-background-scan.js");
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "GLAD_AH_REPAIR_AUCTION_CONTENT") {
@@ -96,6 +96,7 @@ const AUCTION_CONTENT_FILES = [
   "auction-model.js",
   "auction-core.js",
   "arena-core.js",
+  "arena-simulator.js",
   "arena-scan.js",
   "auction-content.js",
   "arena-content.js"

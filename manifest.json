@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "Gladiatus Auction Sorter",
-  "description": "Sort Gladiatus auction items and inspect arena opponent strength.",
-  "version": "0.1.0",
-    "icons": {
+  "name": "Gladiatus Auction Sorter Battle Simulator",
+  "description": "Gladiatus auction items and simulate arena/turma opponent strength.",
+  "version": "0.2.0",
+  "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
@@ -11,7 +11,7 @@
   "permissions": ["activeTab", "storage", "scripting"],
   "host_permissions": ["https://*.gladiatus.gameforge.com/*"],
   "action": {
-    "default_title": "Gladiatus Auction Scanner",
+    "default_title": "Gladiatus Scanner",
     "default_popup": "popup.html"
   },
   "background": {
@@ -26,7 +26,7 @@
     },
     {
       "matches": ["https://*.gladiatus.gameforge.com/game/*"],
-      "js": ["auction-schema.js", "score-model.js", "auction-model.js", "auction-core.js", "arena-core.js", "arena-scan.js", "auction-content.js", "arena-content.js"],
+      "js": ["auction-schema.js", "score-model.js", "auction-model.js", "auction-core.js", "arena-core.js", "arena-simulator.js", "arena-scan.js", "auction-content.js", "arena-content.js"],
       "css": ["styles.css"],
       "run_at": "document_idle"
     }

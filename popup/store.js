@@ -68,14 +68,24 @@ export function normalizePopupState(saved = {}) {
 
 export async function loadArenaFormulas() {
   const saved = await loadStorage(ARENA.formulasStorageKey);
-  if (saved !== null) return ARENA.normalizeArenaFormulas(saved);
+  let formulas = [];
+  if (saved !== null) {
+    formulas = ARENA.normalizeArenaFormulas(saved);
+  }
 
-  const formulas = ARENA.normalizeArenaFormulas(saved);
-  if (formulas.length) return formulas;
+  if (!formulas.length) {
+    formulas = [ARENA.defaultArenaFormula(), ARENA.defaultSimulatorFormula()];
+    await saveStorage(ARENA.formulasStorageKey, formulas);
+    return formulas;
+  }
 
-  const defaults = [ARENA.defaultArenaFormula()];
-  await saveStorage(ARENA.formulasStorageKey, defaults);
-  return defaults;
+  const hasSimulator = formulas.some((f) => f.id === "formula-simulator");
+  if (!hasSimulator) {
+    formulas.push(ARENA.defaultSimulatorFormula());
+    await saveStorage(ARENA.formulasStorageKey, formulas);
+  }
+
+  return formulas;
 }
 
 export async function persistCustomDefinitions() {

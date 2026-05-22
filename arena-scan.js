@@ -134,12 +134,19 @@
   function bootPassive() {
     if (!isGladiatusGamePage(root.location?.href || "")) return;
     bootStatusBox();
-    root.clearTimeout(passiveBootTimer);
-    passiveBootTimer = root.setTimeout(() => {
-      runPassiveCheck().catch((error) => {
-        console.warn("Passive arena scan trigger failed.", error);
-      });
-    }, PASSIVE_BOOT_DELAY_MS);
+
+    if (typeof chrome === "undefined" || !chrome.storage?.local) return;
+    const POPUP_STATE_KEY = window.GladiatusAuctionSchema?.storageKeys?.popupState || "glad-ah-popup-state-v1";
+    chrome.storage.local.get(POPUP_STATE_KEY).then((stored) => {
+      if (!stored[POPUP_STATE_KEY]?.arenaAutoScan) return;
+      
+      root.clearTimeout(passiveBootTimer);
+      passiveBootTimer = root.setTimeout(() => {
+        runPassiveCheck().catch((error) => {
+          console.warn("Passive arena scan trigger failed.", error);
+        });
+      }, PASSIVE_BOOT_DELAY_MS);
+    }).catch(() => {});
   }
 
   function bootStatusBox() {

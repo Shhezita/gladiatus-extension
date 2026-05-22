@@ -542,7 +542,7 @@
       item.cell.style.display = "none";
       item.cell.classList.add("glad-ah-filtered-hidden");
     }
-    
+
     // Sort items in the DOM by reusing existing TR rows (ultra-fast)
     const allCells = [...visibleItems.map(i => i.cell), ...hiddenItems.map(i => i.cell)];
     const trs = Array.from(tbody.querySelectorAll("tr"));
@@ -552,20 +552,18 @@
       if (cellIndex < allCells.length) tr.append(allCells[cellIndex++]);
     }
 
-    clearBadges(items);
-    updateBadges(visibleItems, option);
+    updateBadges(items, option);
     updateItemCount(visibleItems.length, items.length);
-  }
-
-  function clearBadges(items) {
-    items.forEach((item) => {
-      item.cell.querySelectorAll(`.${BADGE_CLASS}`).forEach((badge) => badge.remove());
-    });
   }
 
   function updateBadges(items, option) {
     items.forEach((item) => {
-      if (selectedSort === "original") return;
+      let badge = item.cell.querySelector(`.${BADGE_CLASS}`);
+
+      if (selectedSort === "original") {
+        if (badge) badge.remove();
+        return;
+      }
 
       const target = item.cell.querySelector(".auction_item_div");
       if (!target) return;
@@ -573,10 +571,13 @@
       const score = option.get(item);
       const text = option.display ? option.display(item, score) : `${formatScore(score)} ${option.label}`;
       
-      target.append(h("div", { 
-        className: BADGE_CLASS, 
-        title: item.name 
-      }, text));
+      if (!badge) {
+        badge = h("div", { className: BADGE_CLASS });
+        target.append(badge);
+      }
+      
+      if (badge.title !== (item.name || "")) badge.title = item.name || "";
+      if (badge.textContent !== text) badge.textContent = text;
     });
   }
 

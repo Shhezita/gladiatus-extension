@@ -70,14 +70,20 @@
 
   async function loadFormulaState() {
     if (typeof chrome === "undefined" || !chrome.storage?.local) {
-      arenaFormulas = [ARENA.defaultArenaFormula()];
+      arenaFormulas = [ARENA.defaultArenaFormula(), ARENA.defaultSimulatorFormula()];
       selectedFormulaId = arenaFormulas[0].id;
       return;
     }
 
     const result = await chrome.storage.local.get([ARENA.formulasStorageKey, POPUP_STATE_KEY]);
     const storedFormulas = ARENA.normalizeArenaFormulas(result[ARENA.formulasStorageKey]);
-    arenaFormulas = storedFormulas.length ? storedFormulas : [ARENA.defaultArenaFormula()];
+    arenaFormulas = storedFormulas.length ? storedFormulas : [ARENA.defaultArenaFormula(), ARENA.defaultSimulatorFormula()];
+    
+    if (!arenaFormulas.some((f) => f.id === "formula-simulator")) {
+      arenaFormulas.push(ARENA.defaultSimulatorFormula());
+      await chrome.storage.local.set({ [ARENA.formulasStorageKey]: arenaFormulas });
+    }
+
     selectedFormulaId = String(result[POPUP_STATE_KEY]?.arenaFormulaId || "");
     if (!getSelectedFormula()) selectedFormulaId = getAvailableFormulas()[0]?.id || ARENA.defaultArenaFormula().id;
     isAutoScanEnabled = Boolean(result[POPUP_STATE_KEY]?.arenaAutoScan);
@@ -126,7 +132,7 @@
 
   function annotateResult(result) {
     const entries = ARENA.readArenaOpponentEntries(document, window.location.href);
-    annotateRows(entries, result?.opponents || []);
+    annotateRows(entries, result?.opponents || [], result?.formulaId);
   }
 
   async function annotateCachedResult(options = {}) {
@@ -143,10 +149,11 @@
     return true;
   }
 
-  function annotateRows(entries, opponents) {
+  function annotateRows(entries, opponents, formulaId = "") {
+    const isSimulator = formulaId === "formula-simulator";
     const best = opponents
       .filter((entry) => Number.isFinite(entry.score))
-      .sort((a, b) => a.score - b.score)[0] || null;
+      .sort((a, b) => isSimulator ? (b.score - a.score) : (a.score - b.score))[0] || null;
 
     const opponentsByRow = new Map(opponents.map((candidate) => [candidate.rowIndex, candidate]));
 
@@ -162,7 +169,11 @@
       badge.className = BADGE_CLASS;
 
       if (Number.isFinite(result.score)) {
-        badge.textContent = `${entry.opponent.arenaKind === "team" ? "Team" : "Power"} ${ARENA.formatNumber(result.score)}`;
+        if (isSimulator) {
+          badge.textContent = `Win Chance: ${result.score}%`;
+        } else {
+          badge.textContent = `${entry.opponent.arenaKind === "team" ? "Team" : "Power"} ${ARENA.formatNumber(result.score)}`;
+        }
         badge.title = scoreTitle(result);
         if (result.matches === false) badge.classList.add("glad-arena-score-warning");
       } else {
@@ -274,8 +285,11 @@
     select.addEventListener("change", () => {
       saveSelectedFormulaId(select.value).then(() => {
         clearArenaBadges();
-        if (isAutoScanEnabled) return runAutoScan(button, select, status);
-        return annotateCachedResult();
+        if (isAutoScanEnabled) {
+          return runPanelScan(button, select, status);
+        } else {
+          return annotateCachedResult();
+        }
       }).catch(() => {});
     });
 

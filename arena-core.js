@@ -59,7 +59,12 @@
     "damageMin",
     "damageMax",
     "damageAvg",
-    "healing"
+    "healing",
+    "threat",
+    "avoidCriticalPoints",
+    "blockPoints",
+    "criticalPoints",
+    "criticalHealing"
   ];
 
   const ROLE_SECTION_KEYS = ["duel", "tank", "healer", "damage"];
@@ -120,6 +125,18 @@
     }
   };
 
+  const DEFAULT_SIMULATOR_FORMULA = {
+    id: "formula-simulator",
+    name: "Simulation (Win %)",
+    enabled: true,
+    sections: {
+      duel: { terms: [], constraints: [] },
+      tank: { terms: [], constraints: [] },
+      healer: { terms: [], constraints: [] },
+      damage: { terms: [], constraints: [] }
+    }
+  };
+
   class ArenaCharacter {
     constructor(data = {}) {
       this.id = String(data.id || "");
@@ -133,6 +150,9 @@
       this.roleLabel = String(data.roleLabel || ROLE_SECTION_LABELS[this.role] || this.role);
       this.stats = normalizeStats({ ...(data.stats || {}), level: this.level });
       this.costume = data.costume || null;
+      
+      this.life = Array.isArray(data.life) ? data.life : [0, 0];
+      this.buffs = data.buffs || { minerva: false, mars: false, apollo: false, honour_veteran: false, honour_destroyer: false };
     }
 
     get primaryStatSum() {
@@ -160,7 +180,9 @@
         roleLabel: this.roleLabel,
         stats: { ...this.stats },
         costume: this.costume || null,
-        scores: characterScores(this)
+        scores: characterScores(this),
+        life: this.life,
+        buffs: this.buffs
       };
     }
   }
@@ -249,16 +271,39 @@
 
   function parseCharacterFromHtml(html, meta = {}) {
     if (!sharedParser) return new ArenaCharacter(meta);
-    return parseCharacterFromDocument(sharedParser.parseFromString(String(html || ""), "text/html"), meta);
+    return parseCharacterFromDocument(sharedParser.parseFromString(String(html || ""), "text/html"), meta, String(html || ""));
   }
 
-  function parseCharacterFromDocument(doc, meta = {}) {
+  function parseCharacterFromDocument(doc, meta = {}, rawHtml = "") {
     const activeDoll = readActiveDollMeta(doc, meta.profileUrl);
     const stat = (key) => parseInteger(doc.querySelector(PROFILE_SELECTORS[key])?.textContent);
     const damage = parseDamageRange(doc.querySelector(PROFILE_SELECTORS.damage)?.textContent || "");
     const name = doc.querySelector(".playername")?.textContent?.trim() || meta.name || activeDoll.name;
     const level = stat("level") || meta.level;
     const costume = meta.costume || parseCostumeFromDocument(doc);
+    
+    const threat = parseInteger(doc.querySelector("#char_threat")?.textContent);
+    const lifeTooltip = doc.querySelector("#char_leben_tt")?.getAttribute("data-tooltip") || "";
+    const lifeMatch = lifeTooltip.match(/"([\d.,]+)\s*\\?\/\s*([\d.,]+)"/);
+    const life = lifeMatch ? [parseInteger(lifeMatch[1]), parseInteger(lifeMatch[2])] : [0, 0];
+
+    const N = [...rawHtml.matchAll(/&quot;,(-?\d+)],\s*\[&quot;#BA9700&quot;,&quot;#BA9700&quot;\]\]/g)].map((W) => parseInteger(W[1]));
+    const avoidCriticalPoints = N[7] || 0;
+    const blockPoints = N[8] || 0;
+    const criticalPoints = N[9] || 0;
+    const criticalHealing = N[11] || 0;
+
+    const H = [...rawHtml.matchAll(/&quot;,&quot;(\d+) %&quot;\],\[&quot;#DDDDDD&quot;,&quot;#DDDDDD&quot;\]\]/g)].map((W) => parseInteger(W[1]));
+    const avoidCriticalPercent = H[0] || 0;
+    const blockPercent = H[1] || 0;
+    const criticalPercent = H[2] || 0;
+    const criticalHealingPercent = H[3] || 0;
+
+    const buffs = { minerva: false, mars: false, apollo: false, honour_veteran: false, honour_destroyer: false };
+    const E = Math.max(2, level - 8);
+    if (criticalPercent - Math.round((52 * criticalPoints) / E / 5) === 10) {
+      buffs.honour_veteran = true;
+    }
 
     return new ArenaCharacter({
       ...meta,
@@ -268,6 +313,8 @@
       role: meta.role || activeDoll.role,
       roleLabel: meta.roleLabel || activeDoll.roleLabel,
       costume,
+      life,
+      buffs,
       stats: {
         level,
         strength: stat("strength"),
@@ -278,6 +325,15 @@
         intelligence: stat("intelligence"),
         armour: stat("armour"),
         healing: stat("healing"),
+        threat,
+        avoidCriticalPoints,
+        blockPoints,
+        criticalPoints,
+        criticalHealing,
+        avoidCriticalPercent,
+        blockPercent,
+        criticalPercent,
+        criticalHealingPercent,
         ...damage
       }
     });
@@ -493,6 +549,10 @@
     return cloneArenaFormula(DEFAULT_ARENA_FORMULA);
   }
 
+  function defaultSimulatorFormula() {
+    return cloneArenaFormula(DEFAULT_SIMULATOR_FORMULA);
+  }
+
   function normalizeArenaFormulas(formulas) {
     return Array.isArray(formulas)
       ? formulas.map(normalizeArenaFormula).filter(Boolean)
@@ -622,6 +682,9 @@
     resultsStorageKey: RESULTS_STORAGE_KEY,
     scanStatusStorageKey: SCAN_STATUS_STORAGE_KEY,
     arenaOpponentFingerprint,
+    cloneArenaFormula,
+    defaultArenaFormula,
+    defaultSimulatorFormula,
     formatArenaFormula: summarizeArenaFormula,
     formatCharacterStats,
     formatNumber,

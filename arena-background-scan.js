@@ -77,7 +77,6 @@
   async function passiveCheck({ url = "", preferredKind = "", force = false } = {}) {
     if (!isGladiatusGamePage(url)) return [];
 
-    log("passive check starting", { url: safeUrl(url) });
     await rememberListUrl(url);
     const formula = await loadSelectedFormula();
     const results = [];
@@ -86,7 +85,6 @@
       results.push(await checkPassiveKind(kind, formula, { url, force }));
     }
 
-    log("passive check finished", { results });
     return results;
   }
 
@@ -125,7 +123,6 @@
   }
 
   async function checkPassiveKind(kind, formula, options = {}) {
-    log("checking scan cache", { kind });
     await updateScanStatus(kind, {
       state: "checking",
       source: "passive",
@@ -135,7 +132,6 @@
     const cache = await loadPassiveCache();
     const record = cache[kind] || {};
     const candidates = arenaListCandidates(kind, options.url || "", record.listUrl);
-    log("arena list candidates", { kind, urls: candidates.map(safeUrl), stored: Boolean(record.listUrl) });
     if (!candidates.length) {
       await updateScanStatus(kind, {
         state: "skipped",
@@ -152,7 +148,6 @@
     const scannedAt = Date.parse(record.scannedAt || record.result?.scannedAt || "");
     const checkedAt = Date.parse(record.checkedAt || "");
     if (!options.force && record.result && Number.isFinite(scannedAt) && now - scannedAt < FULL_SCAN_QUIET_MS) {
-      log("skip scan; full scan is still inside quiet period", { kind, scannedAt: record.scannedAt || record.result?.scannedAt });
       await updateScanStatus(kind, {
         state: "ready",
         source: "passive",
@@ -168,7 +163,6 @@
       return { kind, skipped: "quiet" };
     }
     if (!options.force && Number.isFinite(checkedAt) && now - checkedAt < LIST_CHECK_INTERVAL_MS) {
-      log("skip list check; checked recently", { kind, checkedAt: record.checkedAt });
       await updateScanStatus(kind, {
         state: record.result ? "ready" : "skipped",
         source: "passive",
@@ -186,7 +180,6 @@
 
     const lockId = await acquirePassiveLock(kind, now);
     if (!lockId) {
-      log("skip scan; another scan is in flight", { kind });
       await updateLockedStatus(kind, {
         source: "passive",
         checkedAt: record.checkedAt || "",
@@ -199,7 +192,6 @@
       let lastError = "";
       for (const listUrl of candidates) {
         try {
-          log("fetch arena page", { kind, url: safeUrl(listUrl) });
           await updateScanStatus(kind, {
             state: "checking",
             source: "passive",
@@ -210,7 +202,6 @@
           });
           const html = await fetchArenaListHtml(listUrl);
           const entries = readArenaOpponentEntriesFromHtml(html, listUrl);
-          log("got player list", { kind, url: safeUrl(listUrl), count: entries.length });
           await updateScanStatus(kind, {
             state: "checking",
             source: "passive",
@@ -241,7 +232,6 @@
           return { kind, ...ensured };
         } catch (error) {
           lastError = error.message || String(error);
-          log("arena page candidate failed", { kind, url: safeUrl(listUrl), error: lastError });
           if (record.listUrl) throw error;
         }
       }
@@ -259,7 +249,6 @@
         scannedAt: record.scannedAt || record.result?.scannedAt || "",
         lastError
       });
-      log("no opponents found in arena page candidates", { kind, lastError });
       return { kind, skipped: "no-opponents" };
     } catch (error) {
       const message = error.message || String(error);
@@ -276,7 +265,6 @@
         scannedAt: record.scannedAt || record.result?.scannedAt || "",
         lastError: message
       });
-      log("passive scan failed", { kind, error: message });
       return { kind, error: message };
     }
   }
@@ -333,12 +321,10 @@
         profileTotal: defaultProfileTotal(kind, record.result?.opponentCount || entries.length),
         lastError: ""
       });
-      log("scan data already matches opponent list", { kind, source: options.scanSource || "unknown", count: entries.length });
       return { result: record.result, skipped: "unchanged" };
     }
 
     if (options.scanIfMissing === false) {
-      log("no matching cached scan for opponent list", { kind, source: options.scanSource || "unknown", count: entries.length });
       return { result: null, skipped: "missing" };
     }
 
@@ -358,7 +344,6 @@
     }
 
     try {
-      log("opponent list changed or no scan exists; commence scanning", { kind, source: options.scanSource || "unknown", count: entries.length });
       const result = await scanEntries(entries, formula, {
         arenaKind: kind,
         sourceUrl: options.sourceUrl || listUrl,
@@ -389,7 +374,6 @@
         profileTotal: defaultProfileTotal(kind, result.opponentCount),
         lastError: ""
       });
-      log("saved scan result", { kind, source: options.scanSource || "unknown", opponents: result.opponentCount, failed: result.failedCount });
       return { result, scanned: true };
     } catch (error) {
       await updateScanStatus(kind, {
@@ -424,7 +408,6 @@
     };
     let nextIndex = 0;
 
-    log("commence profile scanning", { kind: arenaKind, count: entries.length, concurrency, delayMs, sourceUrl: safeUrl(options.sourceUrl || "") });
     await updateScanStatus(arenaKind, {
       state: "scanning",
       source: progress.source,
@@ -436,18 +419,65 @@
       lastError: ""
     });
 
+    let playerContext = null;
+    if (formula.id === "formula-simulator") {
+      try {
+        const sourceUrlObj = new URL(options.sourceUrl || root.location?.href || "");
+        const playerUrlObj = new URL("/game/index.php?mod=player", sourceUrlObj.href);
+        const sh = sourceUrlObj.searchParams.get("sh");
+        if (sh) playerUrlObj.searchParams.set("sh", sh);
+        const playerUrl = playerUrlObj.href;
+        let playerHtml = await fetchProfileHtml(playerUrl, fetchCache);
+        
+        let ownPlayerId = null;
+        const idMatch1 = playerHtml.match(/var\s+playerId\s*=\s*['"]?(\d+)['"]?/i);
+        const idMatch2 = playerHtml.match(/mod=player&(?:amp;)?p=(\d+)/i);
+        if (idMatch1 && idMatch1[1]) ownPlayerId = idMatch1[1];
+        else if (idMatch2 && idMatch2[1]) ownPlayerId = idMatch2[1];
+
+        if (ownPlayerId) {
+            const publicProfileUrlObj = new URL("/game/index.php?mod=player", sourceUrlObj.href);
+            publicProfileUrlObj.searchParams.set("p", ownPlayerId);
+            if (arenaKind === "single") {
+                publicProfileUrlObj.searchParams.set("doll", "1");
+            }
+            if (sh) publicProfileUrlObj.searchParams.set("sh", sh);
+            const lang = sourceUrlObj.searchParams.get("language");
+            if (lang) publicProfileUrlObj.searchParams.set("language", lang);
+            const publicPlayerUrl = publicProfileUrlObj.href;
+            
+            const publicHtml = await fetchProfileHtml(publicPlayerUrl, fetchCache);
+            playerHtml = publicHtml;
+        } else {
+        }
+
+        if (arenaKind === "team") {
+          const tabs = teamDollTabs(readProfileDollTabsFromHtml(playerHtml, playerUrl));
+          const baseCostume = ARENA.parseCostumeFromHtml(playerHtml);
+          const characters = [];
+          for (const tab of tabs) {
+             const dollHtml = await fetchProfileHtml(tab.url, fetchCache);
+             characters.push(parseCharacterFromHtml(dollHtml, {
+                role: tab.role,
+                roleLabel: tab.roleLabel,
+                costume: baseCostume
+             }));
+          }
+          playerContext = { characters, isTeam: true };
+        } else {
+          const char = parseCharacterFromHtml(playerHtml, { role: "duel", roleLabel: ARENA.roleSectionLabels.duel });
+          playerContext = { characters: [char], isTeam: false };
+        }
+      } catch (err) {
+      }
+    }
+
     async function worker() {
       while (nextIndex < entries.length) {
         const index = nextIndex;
         nextIndex += 1;
         const entry = entries[index];
-        log("scan opponent profile", {
-          kind: entry.opponent.arenaKind,
-          rowIndex: entry.opponent.rowIndex,
-          name: entry.opponent.name,
-          profileUrl: safeUrl(entry.opponent.profileUrl)
-        });
-        opponents[index] = await scanOpponentEntry(entry, formula, { delayMs, progress, fetchCache });
+        opponents[index] = await scanOpponentEntry(entry, formula, { delayMs, progress, fetchCache, playerContext });
         progress.opponentDone += 1;
         await updateScanStatus(arenaKind, {
           state: "scanning",
@@ -462,45 +492,61 @@
         if (progress.opponentDone < entries.length) await delay(delayMs);
       }
     }
-    await Promise.all(Array.from({ length: concurrency }, () => worker()));
+    try {
+      await Promise.all(Array.from({ length: concurrency }, () => worker()));
 
-    const successful = opponents.filter((entry) => Number.isFinite(entry.score));
-    const best = [...successful].sort((a, b) => a.score - b.score)[0] || null;
+      const successful = opponents.filter((entry) => Number.isFinite(entry.score));
+      const best = [...successful].sort((a, b) => a.score - b.score)[0] || null;
 
-    const result = {
-      scannedAt: new Date().toISOString(),
-      formulaId: formula.id,
-      formulaName: formula.name,
-      formulaFingerprint: arenaFormulaFingerprint(formula),
-      arenaKind,
-      sourceUrl: options.sourceUrl || "",
-      fingerprint,
-      opponentCount: opponents.length,
-      failedCount: opponents.filter((entry) => entry.error).length,
-      bestName: best?.displayName || "",
-      bestScore: best?.score || 0,
-      opponents
-    };
-    log("profile scanning finished", { kind: arenaKind, count: result.opponentCount, failed: result.failedCount });
-    return result;
+      const result = {
+        scannedAt: new Date().toISOString(),
+        formulaId: formula.id,
+        formulaName: formula.name,
+        formulaFingerprint: arenaFormulaFingerprint(formula),
+        arenaKind,
+        sourceUrl: options.sourceUrl || "",
+        fingerprint,
+        opponentCount: opponents.length,
+        failedCount: opponents.filter((entry) => entry.error).length,
+        bestName: best?.displayName || "",
+        bestScore: best?.score || 0,
+        opponents
+      };
+      return result;
+    } finally {
+      if (arenaKind === "team") {
+        try {
+          const restoreUrl = new URL("/game/index.php?mod=player&doll=1", options.sourceUrl || root.location?.href || "https://localhost");
+          await fetchProfileHtml(restoreUrl.href, fetchCache);
+        } catch (e) {
+
+        }
+      }
+    }
   }
 
   async function scanOpponentEntry(entry, formula, options = {}) {
     let countedBaseProfile = false;
     try {
-      const html = await fetchProfileHtml(entry.opponent.profileUrl, options.fetchCache);
+      let fetchUrl = entry.opponent.profileUrl;
+      if (entry.opponent.arenaKind === "single") {
+        try {
+          const urlObj = new URL(fetchUrl, options.sourceUrl || root.location?.href || "https://localhost");
+          urlObj.searchParams.set("doll", "1");
+          fetchUrl = urlObj.href;
+        } catch (e) {
+
+        }
+      }
+      
+      const html = await fetchProfileHtml(fetchUrl, options.fetchCache);
       await incrementProfileProgress(options.progress);
       countedBaseProfile = true;
       return entry.opponent.arenaKind === "team"
         ? await scanTeamOpponent(entry, html, formula, options)
-        : scanSingleOpponent(entry, html, formula);
+        : scanSingleOpponent(entry, html, formula, options);
     } catch (error) {
       if (!countedBaseProfile) await incrementProfileProgress(options.progress);
-      log("opponent profile scan failed", {
-        name: entry.opponent.name,
-        profileUrl: safeUrl(entry.opponent.profileUrl),
-        error: error.message || String(error)
-      });
       return {
         rowIndex: entry.opponent.rowIndex,
         opponent: { ...entry.opponent },
@@ -511,13 +557,24 @@
     }
   }
 
-  function scanSingleOpponent(entry, html, formula) {
+  function scanSingleOpponent(entry, html, formula, options = {}) {
     const character = parseCharacterFromHtml(html, {
       ...entry.opponent,
       role: "duel",
       roleLabel: ARENA.roleSectionLabels.duel
     });
-    const scored = ARENA.scoreArenaCharacter(character, formula);
+
+    let scored;
+    if (formula.id === "formula-simulator" && root.GladiatusArenaSimulator && options.playerContext) {
+      const simResult = root.GladiatusArenaSimulator.arena_simulator(options.playerContext.characters[0], character, { simulates: 500, rounds: 15 });
+      scored = {
+        score: simResult["win-chance"] || 0,
+        matches: true,
+        sectionKey: "duel"
+      };
+    } else {
+      scored = ARENA.scoreArenaCharacter(character, formula);
+    }
 
     return {
       rowIndex: entry.opponent.rowIndex,
@@ -532,19 +589,12 @@
 
   async function scanTeamOpponent(entry, html, formula, options = {}) {
     const tabs = teamDollTabs(readProfileDollTabsFromHtml(html, entry.opponent.profileUrl));
-    log("read circus team tabs", { name: entry.opponent.name, count: tabs.length });
     if (!tabs.length) throw new Error("Could not find Circus team tabs on profile.");
 
     const baseCostume = ARENA.parseCostumeFromHtml(html);
     const delayMs = Number(options.delayMs) || MANUAL_SCAN_DELAY_MS;
     const characters = [];
     for (const tab of tabs) {
-      log("scan circus doll", {
-        name: entry.opponent.name,
-        doll: tab.doll,
-        role: tab.role,
-        profileUrl: safeUrl(tab.url)
-      });
       let dollHtml = "";
       try {
         dollHtml = await fetchProfileHtml(tab.url, options.fetchCache);
@@ -561,7 +611,27 @@
       }));
       await delay(delayMs);
     }
-    const team = ARENA.scoreArenaTeam(characters, formula);
+
+    let team;
+    if (formula.id === "formula-simulator" && root.GladiatusArenaSimulator && options.playerContext?.isTeam) {
+      const simResult = root.GladiatusArenaSimulator.turmaArenaSimulator(
+        { players: options.playerContext.characters },
+        { players: characters },
+        { simulates: 50 }
+      );
+      team = {
+        totalScore: simResult["win-chance"] || 0,
+        matches: true,
+        members: characters.map((char) => ({
+          ...char,
+          formulaScore: 0,
+          formulaMatches: true,
+          formulaSection: "duel"
+        }))
+      };
+    } else {
+      team = ARENA.scoreArenaTeam(characters, formula);
+    }
 
     return {
       rowIndex: entry.opponent.rowIndex,
@@ -642,6 +712,26 @@
     const level = stat("char_level") || meta.level;
     const costume = meta.costume || ARENA.parseCostumeFromHtml(html);
 
+    const threat = stat("char_threat") || 0;
+    const lifeTooltip = readHtmlAttribute(html.match(/id\s*=\s*['"]char_leben_tt['"][^>]*>/i)?.[0] || "", "data-tooltip");
+    const lifeMatch = lifeTooltip.match(/"([\d.,]+)\s*\\?\/\s*([\d.,]+)"/);
+    const life = lifeMatch ? [ARENA.parseInteger(lifeMatch[1]), ARENA.parseInteger(lifeMatch[2])] : [0, 0];
+
+    const N = [...html.matchAll(/&quot;,(-?\d+)],\s*\[&quot;#BA9700&quot;,&quot;#BA9700&quot;\]\]/g)].map((W) => ARENA.parseInteger(W[1]));
+    const avoidCriticalPoints = N[7] || 0;
+    const blockPoints = N[8] || 0;
+    const criticalPoints = N[9] || 0;
+    const criticalHealing = N[11] || 0;
+
+    const H = [...html.matchAll(/&quot;,&quot;(\d+) %&quot;\],\[&quot;#DDDDDD&quot;,&quot;#DDDDDD&quot;\]\]/g)].map((W) => ARENA.parseInteger(W[1]));
+    const criticalPercent = H[2] || 0;
+
+    const buffs = { minerva: false, mars: false, apollo: false, honour_veteran: false, honour_destroyer: false };
+    const E = Math.max(2, level - 8);
+    if (criticalPercent - Math.round((52 * criticalPoints) / E / 5) === 10) {
+      buffs.honour_veteran = true;
+    }
+
     return new ARENA.ArenaCharacter({
       ...meta,
       name,
@@ -650,6 +740,8 @@
       role: meta.role || activeDoll.role,
       roleLabel: meta.roleLabel || activeDoll.roleLabel,
       costume,
+      life,
+      buffs,
       stats: {
         level,
         strength: stat("char_f0"),
@@ -660,6 +752,11 @@
         intelligence: stat("char_f5"),
         armour: stat("char_panzer"),
         healing: stat("char_healing"),
+        threat,
+        avoidCriticalPoints,
+        blockPoints,
+        criticalPoints,
+        criticalHealing,
         ...damage
       }
     }).toJSON();
@@ -710,7 +807,6 @@
 
   async function rememberListUrl(url = "") {
     if (!ARENA.isArenaPageUrl(url)) {
-      log("current page is not an arena list; using derived URLs if needed", { url: safeUrl(url) });
       return "";
     }
     const kind = ARENA.arenaKindFromUrl(url);
@@ -718,7 +814,6 @@
       ...record,
       listUrl: url
     }));
-    log("remembered visible arena list URL", { kind, url: safeUrl(url) });
     return kind;
   }
 
@@ -749,7 +844,6 @@
 
     const confirmed = await loadPassiveCache();
     const acquired = confirmed[kind]?.lock?.id === lockId;
-    log(acquired ? "acquired scan lock" : "failed to acquire scan lock", { kind });
     return acquired ? lockId : "";
   }
 
@@ -924,7 +1018,7 @@
     const normalized = normalizeProfileUrl(url).href;
     if (fetchCache && fetchCache.has(normalized)) return fetchCache.get(normalized);
 
-    const promise = fetchGladiatusHtml(normalizeProfileUrl(url), "Profile");
+    const promise = fetchGladiatusHtml(new URL(normalized), "Profile");
     if (fetchCache) fetchCache.set(normalized, promise);
     return promise;
   }
@@ -937,15 +1031,12 @@
     let lastStatus = 0;
 
     for (let attempt = 0; attempt < 4; attempt += 1) {
-      log(`${label} fetch attempt`, { attempt: attempt + 1, url: safeUrl(url.href) });
       const response = await fetch(url.href, { credentials: "include" });
       if (response.ok) {
-        log(`${label} fetch HTTP ok`, { attempt: attempt + 1, url: safeUrl(url.href), status: response.status });
         return response.text();
       }
 
       lastStatus = response.status;
-      log(`${label} fetch HTTP failed`, { attempt: attempt + 1, url: safeUrl(url.href), status: response.status });
       if (!RETRYABLE_PROFILE_STATUSES.has(response.status) || attempt === 3) {
         throw new Error(`${label} fetch failed with HTTP ${response.status}.`);
       }
@@ -953,14 +1044,13 @@
       const waitMs = response.status === 429 ? 1500 : 500 * (attempt + 1);
       await delay(waitMs);
     }
-
     throw new Error(`${label} fetch failed with HTTP ${lastStatus || "unknown"}.`);
   }
 
   function normalizeProfileUrl(rawUrl) {
     const url = new URL(String(rawUrl || ""));
-    if (url.protocol !== "https:") throw new Error("Only HTTPS Gladiatus profile URLs can be fetched.");
-    if (!url.hostname.endsWith(".gladiatus.gameforge.com")) throw new Error("Only Gladiatus profile URLs can be fetched.");
+    if (url.protocol !== "https:") throw new Error("Only HTTPS Gladiatus profiles can be fetched.");
+    if (!url.hostname.endsWith(".gladiatus.gameforge.com")) throw new Error("Only Gladiatus profiles can be fetched.");
     if (!url.pathname.endsWith("/game/index.php") || url.searchParams.get("mod") !== "player") {
       throw new Error("Only Gladiatus player profiles can be fetched.");
     }
@@ -1067,9 +1157,7 @@
     return new Promise((resolve) => setTimeout(resolve, milliseconds));
   }
 
-  function log(message, details = {}) {
-    console.log(LOG_PREFIX, message, details);
-  }
+  function log() {}
 
   function safeUrl(value) {
     try {
