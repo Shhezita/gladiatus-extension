@@ -737,7 +737,7 @@
       }
     });
 
-    const applyButton = h("button", { type: "button", onclick: sortItems }, "Apply");
+    //const applyButton = h("button", { type: "button", onclick: sortItems }, "Apply");
     const count = h("span", { className: "glad-ah-count" }, `${collectItems().length} items`);
 
     const panel = h("div", { id: UI_ID },
@@ -749,7 +749,7 @@
       select,
       orderButton,
       filterControls,
-      applyButton,
+     // applyButton,
       count
     );
 
