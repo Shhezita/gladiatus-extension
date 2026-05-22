@@ -38,12 +38,34 @@ const arenaView = createArenaView({ render });
 nodes.scanButton.addEventListener("click", onScanButtonClick);
 nodes.pageTabs.addEventListener("click", onPageTabClick);
 nodes.tabs.addEventListener("click", onItemTabClick);
+function debounce(func, wait) {
+  let timeout;
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
+}
+
+const debouncedControlInput = debounce(async (event) => {
+  if (state.pageMode === "arena" && await arenaView.onControlsInput(event)) return;
+  await auctionView.onFilterInput(event);
+}, 150);
+
+const debouncedEditorInput = debounce((event) => {
+  if (state.pageMode === "arena" && arenaView.onEditorInput(event)) return;
+  auctionView.onEditorInput(event);
+}, 150);
+
 nodes.controls.addEventListener("click", onPresetClick);
-nodes.controls.addEventListener("input", onControlInput);
-nodes.controls.addEventListener("change", onControlInput);
+nodes.controls.addEventListener("input", debouncedControlInput);
+nodes.controls.addEventListener("change", debouncedControlInput);
 nodes.results.addEventListener("click", onResultsClick);
-nodes.results.addEventListener("input", onEditorInput);
-nodes.results.addEventListener("change", onEditorInput);
+nodes.results.addEventListener("input", debouncedEditorInput);
+nodes.results.addEventListener("change", debouncedEditorInput);
 
 init();
 
@@ -171,21 +193,24 @@ function render() {
 }
 
 function configureHeader() {
+  const titleIcon = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--glad-border-active);"><path d="m14.5 16 3.5-3.5L14.5 9"/><path d="M9.5 8 6 11.5l3.5 3.5"/><path d="M16 4v16M8 4v16"/></svg>`;
+  const scanIcon = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>`;
+
   if (state.pageMode === "arena") {
-    nodes.title.textContent = "Arena scanner";
-    nodes.scanButton.textContent = "Scan opponents";
+    nodes.title.innerHTML = `${titleIcon} Arena Scanner`;
+    nodes.scanButton.innerHTML = `${scanIcon} Scan Opponents`;
     nodes.scanButton.hidden = false;
     return;
   }
 
   if (state.pageMode === "auction") {
-    nodes.title.textContent = "Auction scanner";
-    nodes.scanButton.textContent = "Scan auction";
+    nodes.title.innerHTML = `${titleIcon} Auction Scanner`;
+    nodes.scanButton.innerHTML = `${scanIcon} Scan Auction`;
     nodes.scanButton.hidden = false;
     return;
   }
 
-  nodes.title.textContent = "Gladiatus helper";
+  nodes.title.innerHTML = `${titleIcon} Gladiatus Helper`;
   nodes.scanButton.hidden = true;
 }
 
@@ -223,19 +248,11 @@ async function onPresetClick(event) {
   await auctionView.onPresetClick(event);
 }
 
-async function onControlInput(event) {
-  if (state.pageMode === "arena" && await arenaView.onControlsInput(event)) return;
-  await auctionView.onFilterInput(event);
-}
+
 
 async function onResultsClick(event) {
   if (state.pageMode === "arena" && await arenaView.onResultsClick(event)) return;
   await auctionView.onResultsClick(event);
-}
-
-function onEditorInput(event) {
-  if (state.pageMode === "arena" && arenaView.onEditorInput(event)) return;
-  auctionView.onEditorInput(event);
 }
 
 async function applyCurrentSortToPage() {
@@ -253,6 +270,5 @@ async function applyCurrentSortToPage() {
       filterValues
     });
   } catch {
-    // The popup can still browse cached scan results when the active tab is not an auction page.
-  }
+    return true;}
 }

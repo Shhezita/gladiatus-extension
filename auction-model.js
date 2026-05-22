@@ -3,8 +3,6 @@
   const SCHEMA = root.GladiatusAuctionSchema;
   const SCORE = root.GladiatusScoreModel;
   if (!SCHEMA) {
-    // Non-auction pages do not need the auction model. The auction content script
-    // performs a strict dependency check only when it is actually on auction.
     return;
   }
   if (!SCORE) {

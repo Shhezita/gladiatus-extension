@@ -14,6 +14,7 @@
   const POPUP_STATE_KEY = window.GladiatusAuctionSchema?.storageKeys?.popupState || "glad-ah-popup-state-v1";
   let arenaFormulas = [ARENA.defaultArenaFormula()];
   let selectedFormulaId = "";
+  let isAutoScanEnabled = false;
   let bootTimer = 0;
 
   function isArenaPageUrl(url) {
@@ -79,6 +80,7 @@
     arenaFormulas = storedFormulas.length ? storedFormulas : [ARENA.defaultArenaFormula()];
     selectedFormulaId = String(result[POPUP_STATE_KEY]?.arenaFormulaId || "");
     if (!getSelectedFormula()) selectedFormulaId = getAvailableFormulas()[0]?.id || ARENA.defaultArenaFormula().id;
+    isAutoScanEnabled = Boolean(result[POPUP_STATE_KEY]?.arenaAutoScan);
   }
 
   function getAvailableFormulas() {
@@ -104,6 +106,19 @@
     });
   }
 
+  async function saveAutoScanState(enabled) {
+    isAutoScanEnabled = Boolean(enabled);
+    if (typeof chrome === "undefined" || !chrome.storage?.local) return;
+
+    const result = await chrome.storage.local.get(POPUP_STATE_KEY);
+    await chrome.storage.local.set({
+      [POPUP_STATE_KEY]: {
+        ...(result[POPUP_STATE_KEY] || {}),
+        arenaAutoScan: isAutoScanEnabled
+      }
+    });
+  }
+
   async function saveArenaResult(result) {
     if (typeof chrome === "undefined" || !chrome.storage?.local) return;
     await chrome.storage.local.set({ [ARENA.resultsStorageKey]: result });
@@ -115,15 +130,10 @@
   }
 
   async function annotateCachedResult(options = {}) {
-    const result = options.fromStorage
-      ? await SCANNER.getCachedResultForCurrentPage(getSelectedFormula(), {
-        updateLastResult: true,
-        scanSource: "storage"
-      })
-      : await SCANNER.ensureScanForCurrentPage(getSelectedFormula(), {
-        updateLastResult: true,
-        scanSource: "visible"
-      });
+    const result = await SCANNER.getCachedResultForCurrentPage(getSelectedFormula(), {
+      updateLastResult: true,
+      scanSource: options.fromStorage ? "storage" : "visible"
+    });
     if (!result) return false;
 
     clearArenaBadges();
@@ -138,8 +148,10 @@
       .filter((entry) => Number.isFinite(entry.score))
       .sort((a, b) => a.score - b.score)[0] || null;
 
+    const opponentsByRow = new Map(opponents.map((candidate) => [candidate.rowIndex, candidate]));
+
     for (const entry of entries) {
-      const result = opponents.find((candidate) => candidate.rowIndex === entry.opponent.rowIndex);
+      const result = opponentsByRow.get(entry.opponent.rowIndex);
       if (!result) continue;
 
       const targetCell = entry.link.parentElement || entry.row.cells?.[0];
@@ -187,6 +199,22 @@
     document.querySelectorAll(`.${BEST_CLASS}`).forEach((row) => row.classList.remove(BEST_CLASS));
   }
 
+  function h(tag, props, ...children) {
+    const el = document.createElement(tag);
+    if (props) {
+      for (const [key, value] of Object.entries(props)) {
+        if (key === "className") el.className = value;
+        else if (key === "textContent") el.textContent = value;
+        else if (key === "innerHTML") el.innerHTML = value;
+        else if (typeof value === "function") el.addEventListener(key.replace(/^on/, "").toLowerCase(), value);
+        else if (key === "style" && typeof value === "object") Object.assign(el.style, value);
+        else el.setAttribute(key === "htmlFor" ? "for" : key.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`), String(value));
+      }
+    }
+    el.append(...children.flat().filter((c) => c != null && c !== false));
+    return el;
+  }
+
   function ensurePanel() {
     if (!ARENA.isArenaPageUrl(window.location.href) || document.getElementById(PANEL_ID)) return;
 
@@ -194,42 +222,51 @@
     const table = entries[0]?.row?.closest("table");
     if (!table) return;
 
-    const panel = document.createElement("div");
-    panel.id = PANEL_ID;
-
-    const title = document.createElement("strong");
-    title.textContent = "Arena scanner";
-
-    const formulaLabel = document.createElement("label");
-    formulaLabel.htmlFor = "glad-arena-formula";
-    formulaLabel.textContent = "Formula";
-
-    const select = document.createElement("select");
-    select.id = "glad-arena-formula";
+    const status = h("span", { className: "glad-arena-status", textContent: `${entries.length} opponents` });
+    const select = h("select", { id: "glad-arena-formula" });
     renderFormulaOptions(select);
+
+    const button = h("button", {
+      type: "button",
+      textContent: "Scan scores",
+      onClick: () => {
+        runPanelScan(button, select, status).catch((error) => {
+          setPanelStatus(status, error.message || String(error), true);
+        });
+      }
+    });
+
+    const toggleButton = h("button", {
+      type: "button",
+      className: isAutoScanEnabled ? "glad-arena-button-active" : "",
+      textContent: isAutoScanEnabled ? "Auto: On" : "Auto: Off",
+      style: { marginLeft: "4px" },
+      onClick: () => {
+        saveAutoScanState(!isAutoScanEnabled).then(() => {
+          toggleButton.textContent = isAutoScanEnabled ? "Auto: On" : "Auto: Off";
+          toggleButton.classList.toggle("glad-arena-button-active", isAutoScanEnabled);
+          if (isAutoScanEnabled) runAutoScan(button, select, status).catch(() => {});
+        });
+      }
+    });
+
     select.addEventListener("change", () => {
-      saveSelectedFormulaId(select.value)
-        .then(() => {
-          clearArenaBadges();
-          return annotateCachedResult();
-        })
-        .catch(() => {});
+      saveSelectedFormulaId(select.value).then(() => {
+        clearArenaBadges();
+        if (isAutoScanEnabled) return runAutoScan(button, select, status);
+        return annotateCachedResult();
+      }).catch(() => {});
     });
 
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = "Scan scores";
-    button.addEventListener("click", () => {
-      runPanelScan(button, select, status).catch((error) => {
-        setPanelStatus(status, error.message || String(error), true);
-      });
-    });
+    const panel = h("div", { id: PANEL_ID },
+      h("strong", { style: { display: "inline-flex", alignItems: "center", gap: "6px" }, innerHTML: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--glad-border-focus);"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg> Arena Scanner` }),
+      h("label", { htmlFor: "glad-arena-formula", textContent: "Formula" }),
+      select,
+      button,
+      toggleButton,
+      status
+    );
 
-    const status = document.createElement("span");
-    status.className = "glad-arena-status";
-    status.textContent = `${entries.length} opponents`;
-
-    panel.append(title, formulaLabel, select, button, status);
     table.before(panel);
   }
 
@@ -263,6 +300,32 @@
     }
   }
 
+  async function runAutoScan(button, select, status) {
+    if (button) button.disabled = true;
+    if (select) select.disabled = true;
+    if (status) setPanelStatus(status, "Auto scanning...", false);
+
+    try {
+      const formula = getSelectedFormula();
+      const result = await SCANNER.ensureScanForCurrentPage(formula, {
+        updateLastResult: true,
+        scanSource: "visible"
+      });
+      if (result) {
+        clearArenaBadges();
+        annotateResult(result);
+        if (status) setPanelStatus(status, resultStatusText(result, "Auto"), false);
+      } else {
+        await annotateCachedResult({ fromStorage: true });
+      }
+    } catch (error) {
+      if (status) setPanelStatus(status, error.message || String(error), true);
+    } finally {
+      if (button) button.disabled = false;
+      if (select) select.disabled = false;
+    }
+  }
+
   function resultStatusText(result, prefix) {
     if (!result) return "Scan is already running";
     const failed = result.failedCount ? `, ${result.failedCount} failed` : "";
@@ -277,18 +340,27 @@
   }
 
   function boot() {
-    window.clearTimeout(bootTimer);
+    if (bootTimer) return;
     bootTimer = window.setTimeout(() => {
+      bootTimer = 0;
       loadFormulaState()
         .then(async () => {
           ensurePanel();
           subscribeToPassiveCacheChanges();
           await SCANNER.rememberCurrentListUrl(window.location.href);
-          await annotateCachedResult();
+          if (isAutoScanEnabled) {
+            const status = document.querySelector(`#${PANEL_ID} .glad-arena-status`);
+            const button = document.querySelector(`#${PANEL_ID} button`);
+            const select = document.querySelector(`#${PANEL_ID} select`);
+            await runAutoScan(button, select, status);
+          } else {
+            await annotateCachedResult();
+          }
         })
         .catch(() => {
           arenaFormulas = [ARENA.defaultArenaFormula()];
           selectedFormulaId = arenaFormulas[0].id;
+          isAutoScanEnabled = false;
           ensurePanel();
         });
     }, 150);
@@ -302,8 +374,23 @@
     if (!chrome.storage?.onChanged || window.__GladiatusArenaPassiveCacheListener) return;
 
     window.__GladiatusArenaPassiveCacheListener = (changes, areaName) => {
-      if (areaName !== "local" || !changes[ARENA.passiveScansStorageKey]) return;
-      annotateCachedResult({ fromStorage: true }).catch(() => {});
+      if (areaName !== "local") return;
+      if (changes[ARENA.passiveScansStorageKey] || changes[POPUP_STATE_KEY] || changes[ARENA.formulasStorageKey]) {
+        if (changes[POPUP_STATE_KEY] || changes[ARENA.formulasStorageKey]) {
+          loadFormulaState().then(() => {
+            const select = document.getElementById("glad-arena-formula");
+            if (select) renderFormulaOptions(select);
+            const toggleButton = document.querySelector(`#${PANEL_ID} button:nth-of-type(2)`);
+            if (toggleButton) {
+              toggleButton.textContent = isAutoScanEnabled ? "Auto: On" : "Auto: Off";
+              toggleButton.className = isAutoScanEnabled ? "glad-arena-button-active" : "";
+            }
+            annotateCachedResult({ fromStorage: true }).catch(() => {});
+          });
+        } else {
+          annotateCachedResult({ fromStorage: true }).catch(() => {});
+        }
+      }
     };
     chrome.storage.onChanged.addListener(window.__GladiatusArenaPassiveCacheListener);
   }

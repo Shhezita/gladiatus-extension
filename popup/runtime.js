@@ -42,7 +42,6 @@ export function detectPageMode(url) {
       return "auction";
     }
   } catch {
-    // Unsupported pages use the default mode.
   }
 
   return "unsupported";
@@ -66,7 +65,6 @@ export async function ensureAuctionPageUi(tab) {
     const response = await sendTabMessage(tab.id, { type: AUCTION_CONTENT_MESSAGES.boot });
     if (response?.ok) return response;
   } catch {
-    // Retry by explicitly injecting the current content scripts.
   }
 
   await ensureAuctionContentScript(tab.id);

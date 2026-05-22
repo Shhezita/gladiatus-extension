@@ -11,6 +11,7 @@
   const MANUAL_SCAN_DELAY_MS = 150;
   const PASSIVE_SCAN_DELAY_MS = 900;
   const SCAN_CONCURRENCY = 2;
+  const CACHE_TTL_MS = 10 * 60 * 1000;
   const RETRYABLE_PROFILE_STATUSES = new Set([429, 500, 502, 503, 504]);
   const LOG_PREFIX = "[Gladiatus Background Scanner]";
   const KINDS = ["team", "single"];
@@ -302,11 +303,14 @@
     const record = cache[kind] || {};
     const listUrl = options.listUrl || record.listUrl || options.sourceUrl || "";
     const checkedAt = options.checkedAt || new Date().toISOString();
+    const recordScannedAt = Date.parse(record.scannedAt || record.result?.scannedAt || "");
+    const isCacheExpired = Number.isFinite(recordScannedAt) && Date.now() - recordScannedAt > CACHE_TTL_MS;
 
     if (!options.force
       && record.result
       && record.fingerprint === fingerprint
-      && record.formulaFingerprint === formulaKey) {
+      && record.formulaFingerprint === formulaKey
+      && !isCacheExpired) {
       if (options.updateCacheOnMatch || options.checkedAt) {
         await saveCachedResult(kind, {
           listUrl,
@@ -409,6 +413,7 @@
     const delayMs = Number(options.delayMs) || MANUAL_SCAN_DELAY_MS;
     const concurrency = Math.max(1, Math.min(ARENA.parseInteger(options.concurrency) || SCAN_CONCURRENCY, entries.length));
     const opponents = new Array(entries.length);
+    const fetchCache = new Map();
     const progress = {
       kind: arenaKind,
       source: options.scanSource || "unknown",
@@ -442,7 +447,7 @@
           name: entry.opponent.name,
           profileUrl: safeUrl(entry.opponent.profileUrl)
         });
-        opponents[index] = await scanOpponentEntry(entry, formula, { delayMs, progress });
+        opponents[index] = await scanOpponentEntry(entry, formula, { delayMs, progress, fetchCache });
         progress.opponentDone += 1;
         await updateScanStatus(arenaKind, {
           state: "scanning",
@@ -483,7 +488,7 @@
   async function scanOpponentEntry(entry, formula, options = {}) {
     let countedBaseProfile = false;
     try {
-      const html = await fetchProfileHtml(entry.opponent.profileUrl);
+      const html = await fetchProfileHtml(entry.opponent.profileUrl, options.fetchCache);
       await incrementProfileProgress(options.progress);
       countedBaseProfile = true;
       return entry.opponent.arenaKind === "team"
@@ -542,7 +547,7 @@
       });
       let dollHtml = "";
       try {
-        dollHtml = await fetchProfileHtml(tab.url);
+        dollHtml = await fetchProfileHtml(tab.url, options.fetchCache);
       } finally {
         await incrementProfileProgress(options.progress);
       }
@@ -915,8 +920,13 @@
     return JSON.stringify(ARENA.normalizeArenaFormula(rawFormula) || ARENA.defaultArenaFormula());
   }
 
-  async function fetchProfileHtml(url) {
-    return fetchGladiatusHtml(normalizeProfileUrl(url), "Profile");
+  async function fetchProfileHtml(url, fetchCache = null) {
+    const normalized = normalizeProfileUrl(url).href;
+    if (fetchCache && fetchCache.has(normalized)) return fetchCache.get(normalized);
+
+    const promise = fetchGladiatusHtml(normalizeProfileUrl(url), "Profile");
+    if (fetchCache) fetchCache.set(normalized, promise);
+    return promise;
   }
 
   async function fetchArenaListHtml(url) {
@@ -940,7 +950,8 @@
         throw new Error(`${label} fetch failed with HTTP ${response.status}.`);
       }
 
-      await delay(500 * (attempt + 1));
+      const waitMs = response.status === 429 ? 1500 : 500 * (attempt + 1);
+      await delay(waitMs);
     }
 
     throw new Error(`${label} fetch failed with HTTP ${lastStatus || "unknown"}.`);
@@ -966,18 +977,35 @@
     return url;
   }
 
+  const regexCache = new Map();
+
   function textById(html, id) {
-    const pattern = new RegExp(`<([a-zA-Z0-9]+)\\b[^>]*\\bid\\s*=\\s*(["'])${escapeRegExp(id)}\\2[^>]*>([\\s\\S]*?)<\\/\\1>`, "i");
+    const key = `id:${id}`;
+    let pattern = regexCache.get(key);
+    if (!pattern) {
+      pattern = new RegExp(`<([a-zA-Z0-9]+)\\b[^>]*\\bid\\s*=\\s*(["'])${escapeRegExp(id)}\\2[^>]*>([\\s\\S]*?)<\\/\\1>`, "i");
+      regexCache.set(key, pattern);
+    }
     return stripMarkup(String(html || "").match(pattern)?.[3] || "");
   }
 
   function textByClass(html, className) {
-    const pattern = new RegExp(`<([a-zA-Z0-9]+)\\b[^>]*\\bclass\\s*=\\s*(["'])[^"']*\\b${escapeRegExp(className)}\\b[^"']*\\2[^>]*>([\\s\\S]*?)<\\/\\1>`, "i");
+    const key = `class:${className}`;
+    let pattern = regexCache.get(key);
+    if (!pattern) {
+      pattern = new RegExp(`<([a-zA-Z0-9]+)\\b[^>]*\\bclass\\s*=\\s*(["'])[^"']*\\b${escapeRegExp(className)}\\b[^"']*\\2[^>]*>([\\s\\S]*?)<\\/\\1>`, "i");
+      regexCache.set(key, pattern);
+    }
     return stripMarkup(String(html || "").match(pattern)?.[3] || "");
   }
 
   function readHtmlAttribute(value, attribute) {
-    const pattern = new RegExp(`${attribute}\\s*=\\s*("|')([\\s\\S]*?)\\1`, "i");
+    const key = `attr:${attribute}`;
+    let pattern = regexCache.get(key);
+    if (!pattern) {
+      pattern = new RegExp(`${attribute}\\s*=\\s*("|')([\\s\\S]*?)\\1`, "i");
+      regexCache.set(key, pattern);
+    }
     return decodeHtml(String(value || "").match(pattern)?.[2] || "");
   }
 

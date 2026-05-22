@@ -21,7 +21,6 @@
   const MAIN_SCAN_TYPES = SCHEMA.mainScanCategories;
   const MERCENARY_EQUIPMENT_SCAN_TYPES = SCHEMA.mercenaryEquipmentScanCategories;
 
-  // Page and tooltip parsing
   function isAuctionPage(doc = document) {
     return isAuctionPageUrl(doc.location?.href || window.location.href);
   }
@@ -45,6 +44,19 @@
     const scratch = doc.createElement("div");
     scratch.innerHTML = String(value || "");
     return (scratch.textContent || scratch.innerText || "").replace(/\s+/g, " ").trim();
+  }
+
+  const regexCache = new Map();
+  function getStatRegex(type, statName) {
+    const key = `${type}:${statName}`;
+    let pattern = regexCache.get(key);
+    if (!pattern) {
+      if (type === "prefix") pattern = new RegExp(`^${escapeRegExp(statName)}\\b\\s*:?`, "i");
+      else if (type === "value") pattern = new RegExp(`^${escapeRegExp(statName)}\\s*:\\s*([+-]?\\d+)`, "i");
+      else if (type === "word") pattern = new RegExp(`\\b${escapeRegExp(statName)}\\b`, "i");
+      regexCache.set(key, pattern);
+    }
+    return pattern;
   }
 
   function parseInteger(value) {
@@ -145,7 +157,7 @@
       }
 
       for (const statName of STAT_NAMES) {
-        const statPattern = new RegExp(`^${escapeRegExp(statName)}\\b\\s*:?`, "i");
+        const statPattern = getStatRegex("prefix", statName);
         if (statPattern.test(line)) {
           const key = keyForStat(statName);
           stats[key] = (stats[key] || 0) + parseStatValue(statName, line);
@@ -158,7 +170,7 @@
   }
 
   function parseStatValue(statName, line) {
-    const absolute = line.match(new RegExp(`^${escapeRegExp(statName)}\\s*:\\s*([+-]?\\d+)`, "i"));
+    const absolute = line.match(getStatRegex("value", statName));
     if (absolute) {
       return Number.parseInt(absolute[1], 10) || 0;
     }
@@ -174,7 +186,7 @@
     }
 
     for (const statName of STAT_NAMES) {
-      const statPattern = new RegExp(`\\b${escapeRegExp(statName)}\\b`, "i");
+      const statPattern = getStatRegex("word", statName);
       if (!statPattern.test(text)) continue;
 
       const key = statName.toLowerCase() === "damage" ? "damageBonus" : keyForStat(statName);
@@ -281,7 +293,6 @@
     return body;
   }
 
-  // Scan orchestration and page loading
   async function scanAllAuctionItems() {
     if (!isAuctionPage()) {
       throw new Error("Open a Gladiatus auction page before scanning.");
@@ -388,13 +399,28 @@
     }
   }
 
-  async function fetchDocument(url, options) {
-    const response = await fetch(url, options);
-    if (!response.ok) {
-      throw new Error(`Auction fetch failed with HTTP ${response.status}.`);
-    }
+  function delay(milliseconds) {
+    return new Promise((resolve) => setTimeout(resolve, milliseconds));
+  }
 
-    return new DOMParser().parseFromString(await response.text(), "text/html");
+  async function fetchDocument(url, options) {
+    let lastStatus = 0;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const response = await fetch(url, options);
+      if (response.ok) {
+        return new DOMParser().parseFromString(await response.text(), "text/html");
+      }
+
+      lastStatus = response.status;
+      const RETRYABLE = new Set([429, 500, 502, 503, 504]);
+      if (!RETRYABLE.has(response.status) || attempt === 3) {
+        throw new Error(`Auction fetch failed with HTTP ${response.status}.`);
+      }
+
+      const waitMs = response.status === 429 ? 1500 : 500 * (attempt + 1);
+      await delay(waitMs);
+    }
+    throw new Error(`Auction fetch failed with HTTP ${lastStatus || "unknown"}.`);
   }
 
   function loadDocumentViaFrame(url) {
@@ -480,7 +506,6 @@
     if (form) form.remove();
   }
 
-  // DOM extraction and normalized item records
   function normalizeItemMeta(meta = {}) {
     const category = meta.categoryId
       ? SCHEMA.getScanCategory(meta.categoryId)
@@ -606,7 +631,6 @@
     installPageBridge(api);
   }
 
-  // Page-world bridge
   function shouldInstallPageBridge() {
     const hasExtensionRuntime = typeof chrome !== "undefined" && Boolean(chrome.runtime?.id);
     return document.currentScript?.dataset.gladAuctionPageBridge === "1" || !hasExtensionRuntime;

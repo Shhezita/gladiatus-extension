@@ -332,7 +332,6 @@
         }
       }));
     } catch {
-      // Sorting should still work if local storage is blocked.
     }
   }
 
@@ -529,15 +528,17 @@
   }
 
   function appendTwoColumnRows(items, tbody) {
+    const fragment = document.createDocumentFragment();
     let row = null;
     items.forEach((item, index) => {
       item.cell.classList.remove("glad-ah-filtered-hidden");
       if (index % 2 === 0) {
         row = document.createElement("tr");
-        tbody.append(row);
+        fragment.append(row);
       }
       row.append(item.cell);
     });
+    tbody.append(fragment);
   }
 
   function appendHiddenStash(items, tbody) {
@@ -545,12 +546,13 @@
 
     const row = document.createElement("tr");
     row.className = "glad-ah-filter-stash";
-    tbody.append(row);
 
     items.forEach((item) => {
       item.cell.classList.add("glad-ah-filtered-hidden");
       row.append(item.cell);
     });
+
+    tbody.append(row);
   }
 
   function clearBadges(items) {
@@ -712,7 +714,10 @@
     panel.id = UI_ID;
 
     const title = document.createElement("strong");
-    title.textContent = "Auction sorter";
+    title.style.display = "inline-flex";
+    title.style.alignItems = "center";
+    title.style.gap = "6px";
+    title.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--glad-border-focus);"><path d="m14.5 16 3.5-3.5L14.5 9"/><path d="M9.5 8 6 11.5l3.5 3.5"/><path d="M16 4v16M8 4v16"/></svg> Auction Sorter`;
 
     const label = document.createElement("label");
     label.htmlFor = "glad-ah-sort-field";
@@ -875,7 +880,7 @@
 
       if (!isMessageType(message, MESSAGE_TYPES.scanAll)) return false;
 
-      callPageCore("scanAllAuctionItems")
+      handleScanAll()
         .then((result) => sendResponse({ ok: true, result }))
         .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
 
@@ -886,6 +891,69 @@
   const observer = new MutationObserver(() => {
     scheduleRefresh();
   });
+
+  function getAuctionFilterFingerprint() {
+    const form = getAuctionFilterForm();
+    if (!form) return "";
+    const valueOf = (selector, fallback = "") => form.querySelector(selector)?.value ?? fallback;
+    return JSON.stringify({
+      ttype: new URL(window.location.href).searchParams.get("ttype") || "main",
+      itemType: valueOf("select[name='itemType']"),
+      qry: valueOf("input[name='qry']"),
+      itemLevel: valueOf("select[name='itemLevel']", "39"),
+      itemQuality: valueOf("select[name='itemQuality']", "-1"),
+      signature: getItemSetSignature()
+    });
+  }
+
+  async function handleScanAll() {
+    if (!chrome.storage?.local) return callPageCore("scanAllAuctionItems");
+
+    const fingerprint = getAuctionFilterFingerprint();
+    const LOCK_TIMEOUT_MS = 5 * 60 * 1000;
+    const CACHE_KEY = "glad-ah-scan-cache-v2";
+
+    const stored = await chrome.storage.local.get(CACHE_KEY);
+    const cache = stored[CACHE_KEY] || {};
+
+    if (cache.result && cache.fingerprint === fingerprint) {
+      return cache.result;
+    }
+
+    const now = Date.now();
+    const lockStartedAt = Date.parse(cache.lock?.startedAt || "");
+    if (cache.lock?.id && Number.isFinite(lockStartedAt) && now - lockStartedAt < LOCK_TIMEOUT_MS) {
+      throw new Error("Scan in progress");
+    }
+
+    const lockId = `${now}-${Math.random().toString(36).slice(2)}`;
+    cache.lock = { id: lockId, startedAt: new Date(now).toISOString() };
+    await chrome.storage.local.set({ [CACHE_KEY]: cache });
+
+    const confirmed = await chrome.storage.local.get(CACHE_KEY);
+    if (confirmed[CACHE_KEY]?.lock?.id !== lockId) {
+      throw new Error("Scan in progress");
+    }
+
+    try {
+      const result = await callPageCore("scanAllAuctionItems");
+      const nextCache = await chrome.storage.local.get(CACHE_KEY);
+      const updated = nextCache[CACHE_KEY] || {};
+      updated.fingerprint = fingerprint;
+      updated.result = result;
+      delete updated.lock;
+      await chrome.storage.local.set({ [CACHE_KEY]: updated });
+      return result;
+    } catch (error) {
+      const nextCache = await chrome.storage.local.get(CACHE_KEY);
+      const updated = nextCache[CACHE_KEY] || {};
+      if (updated.lock?.id === lockId) {
+        delete updated.lock;
+        await chrome.storage.local.set({ [CACHE_KEY]: updated });
+      }
+      throw error;
+    }
+  }
 
   initialize().catch(() => {
     boot();

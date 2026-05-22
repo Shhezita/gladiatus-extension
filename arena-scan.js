@@ -101,6 +101,10 @@
     const record = stored[ARENA.passiveScansStorageKey]?.[kind] || {};
     if (!record.result || record.fingerprint !== fingerprint || record.formulaFingerprint !== formulaKey) return null;
 
+    const recordScannedAt = Date.parse(record.scannedAt || record.result?.scannedAt || "");
+    const CACHE_TTL_MS = 10 * 60 * 1000;
+    if (Number.isFinite(recordScannedAt) && Date.now() - recordScannedAt > CACHE_TTL_MS) return null;
+
     if (options.updateLastResult !== false) {
       await chrome.storage.local.set({ [ARENA.resultsStorageKey]: record.result });
     }
@@ -167,16 +171,31 @@
     renderStatusBox(stored[ARENA.scanStatusStorageKey]);
   }
 
+  function h(tag, props, ...children) {
+    const el = root.document.createElement(tag);
+    if (props) {
+      for (const [key, value] of Object.entries(props)) {
+        if (key === "className") el.className = value;
+        else if (key === "textContent") el.textContent = value;
+        else if (key === "innerHTML") el.innerHTML = value;
+        else el.setAttribute(key.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`), String(value));
+      }
+    }
+    el.append(...children.flat().filter((c) => c != null && c !== false));
+    return el;
+  }
+
   function ensureStatusBox() {
     if (!shouldRenderStatusBox()) return null;
     const existing = root.document?.getElementById?.(STATUS_BOX_ID);
     if (existing) return existing;
 
-    const panel = root.document.createElement("div");
-    panel.id = STATUS_BOX_ID;
-    panel.setAttribute("aria-live", "polite");
-    panel.setAttribute("aria-label", "Arena and Circus scan status");
-    insertStatusBox(panel);
+    const panel = h("div", {
+      id: STATUS_BOX_ID,
+      ariaLive: "polite",
+      ariaLabel: "Arena and Circus scan status"
+    });
+    if (!insertStatusBox(panel)) return null;
     return panel;
   }
 
@@ -184,16 +203,10 @@
     const menu = findMenuAnchor();
     if (menu?.parentElement) {
       menu.after(panel);
-      return;
+      return true;
     }
 
-    const content = root.document.getElementById("content") || root.document.querySelector("#content");
-    if (content?.parentElement) {
-      content.before(panel);
-      return;
-    }
-
-    root.document.body?.prepend(panel);
+    return false;
   }
 
   function findMenuAnchor() {
@@ -202,8 +215,10 @@
 
     const selectors = ["#mainmenu", ".mainmenu", "#menu", ".menu", "nav", "#submenu", ".submenu"];
     for (const selector of selectors) {
-      const element = root.document.querySelector(selector);
-      if (element) return element;
+      const elements = root.document.querySelectorAll(selector);
+      for (const element of elements) {
+        if (element.closest && !element.closest("#mmoNetbar, #mmoNetbarSubmenu")) return element;
+      }
     }
     return null;
   }
@@ -240,22 +255,11 @@
   }
 
   function renderStatusRow(kind, record) {
-    const row = root.document.createElement("div");
-    row.className = `glad-arena-passive-status-row glad-arena-passive-status-${record.state}`;
-
-    const label = root.document.createElement("strong");
-    label.textContent = kind === "team" ? "Circus" : "Arena";
-
-    const badge = root.document.createElement("span");
-    badge.className = "glad-arena-passive-status-badge";
-    badge.textContent = statusBadgeText(record);
-
-    const text = root.document.createElement("span");
-    text.className = "glad-arena-passive-status-message";
-    text.textContent = statusText(kind, record);
-
-    row.append(label, badge, text);
-    return row;
+    return h("div", { className: `glad-arena-passive-status-row glad-arena-passive-status-${record.state}` },
+      h("strong", { textContent: kind === "team" ? "Circus" : "Arena" }),
+      h("span", { className: "glad-arena-passive-status-badge", textContent: statusBadgeText(record) }),
+      h("span", { className: "glad-arena-passive-status-message", textContent: statusText(kind, record) })
+    );
   }
 
   function normalizeStatusCache(status) {

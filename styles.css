@@ -1,8 +1,32 @@
+:root {
+  /* AAA 2026 Code Engine - Semantic Variables (In-Game Injection) */
+  --glad-bg-base: #161412;
+  --glad-bg-surface: #1d1916;
+  --glad-bg-surface-hover: #231b15;
+  --glad-bg-elevated: #2a1f16;
+  --glad-bg-elevated-hover: #33251a;
+  
+  --glad-border: #4a3822;
+  --glad-border-light: #523a1a;
+  --glad-border-accent: #7b5b32;
+  --glad-border-focus: #a67938;
+  
+  --glad-text-main: #f3ddb2;
+  --glad-text-muted: #c8aa74;
+  --glad-text-accent: #ffd98a;
+  --glad-text-highlight: #ffe6ae;
+  
+  --glad-radius-sm: 3px;
+  --glad-radius-md: 4px;
+  --glad-transition-fast: 0.1s ease-in-out;
+}
+
 #glad-ah-sorter {
   align-items: center;
-  background: #24180f;
-  border: 1px solid #7b5b32;
-  color: #f3ddb2;
+  background: var(--glad-bg-surface);
+  border: 1px solid var(--glad-border);
+  border-radius: var(--glad-radius-md);
+  color: var(--glad-text-main);
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -11,23 +35,31 @@
 }
 
 #glad-ah-sorter strong {
-  color: #ffd98a;
+  color: var(--glad-text-accent);
   margin-right: 6px;
 }
 
 #glad-ah-sorter label {
-  color: #e9c98c;
+  color: var(--glad-text-muted);
 }
 
 #glad-ah-sorter select,
 #glad-ah-sorter input,
 #glad-ah-sorter button {
-  background: #3b2817;
-  border: 1px solid #9a713d;
-  color: #ffe6ae;
+  background: var(--glad-bg-elevated);
+  border: 1px solid var(--glad-border-light);
+  border-radius: var(--glad-radius-sm);
+  color: var(--glad-text-highlight);
   font: inherit;
   min-height: 24px;
   padding: 2px 7px;
+  transition: background-color var(--glad-transition-fast), border-color var(--glad-transition-fast);
+}
+
+#glad-ah-sorter select:focus,
+#glad-ah-sorter input:focus {
+  border-color: var(--glad-border-focus);
+  outline: none;
 }
 
 #glad-ah-sorter input {
@@ -38,13 +70,18 @@
   cursor: pointer;
 }
 
+#glad-ah-sorter button:hover:not(:disabled) {
+  background: var(--glad-bg-elevated-hover);
+  border-color: var(--glad-border-accent);
+}
+
 #glad-ah-sorter button:disabled {
   cursor: default;
   opacity: 0.55;
 }
 
 #glad-ah-sorter .glad-ah-count {
-  color: #c8aa74;
+  color: var(--glad-text-muted);
   margin-left: auto;
 }
 
@@ -56,7 +93,7 @@
 }
 
 .glad-ah-filter-title {
-  color: #c8aa74;
+  color: var(--glad-text-muted);
   font-weight: 700;
 }
 
@@ -75,9 +112,10 @@
 }
 
 .glad-ah-score {
-  background: rgba(20, 13, 8, 0.88);
+  background: #140d08;
   border: 1px solid #b98943;
-  color: #ffd98a;
+  border-radius: var(--glad-radius-sm);
+  color: var(--glad-text-accent);
   font-size: 10px;
   left: 0;
   line-height: 1.2;
@@ -93,9 +131,10 @@
 }
 
 .glad-arena-score {
-  background: rgba(31, 20, 10, 0.92);
+  background: #1f140a;
   border: 1px solid #b98943;
-  color: #ffd98a;
+  border-radius: var(--glad-radius-sm);
+  color: var(--glad-text-accent);
   display: inline-block;
   font-size: 10px;
   font-weight: 700;
@@ -121,9 +160,10 @@ tr.glad-arena-best > td {
 
 #glad-arena-scanner {
   align-items: center;
-  background: #24180f;
-  border: 1px solid #7b5b32;
-  color: #f3ddb2;
+  background: var(--glad-bg-surface);
+  border: 1px solid var(--glad-border);
+  border-radius: var(--glad-radius-md);
+  color: var(--glad-text-main);
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -132,26 +172,38 @@ tr.glad-arena-best > td {
 }
 
 #glad-arena-scanner strong {
-  color: #ffd98a;
+  color: var(--glad-text-accent);
   margin-right: 6px;
 }
 
 #glad-arena-scanner label {
-  color: #e9c98c;
+  color: var(--glad-text-muted);
 }
 
 #glad-arena-scanner select,
 #glad-arena-scanner button {
-  background: #3b2817;
-  border: 1px solid #9a713d;
-  color: #ffe6ae;
+  background: var(--glad-bg-elevated);
+  border: 1px solid var(--glad-border-light);
+  border-radius: var(--glad-radius-sm);
+  color: var(--glad-text-highlight);
   font: inherit;
   min-height: 24px;
   padding: 2px 7px;
+  transition: background-color var(--glad-transition-fast), border-color var(--glad-transition-fast);
+}
+
+#glad-arena-scanner select:focus {
+  border-color: var(--glad-border-focus);
+  outline: none;
 }
 
 #glad-arena-scanner button {
   cursor: pointer;
+}
+
+#glad-arena-scanner button:hover:not(:disabled) {
+  background: var(--glad-bg-elevated-hover);
+  border-color: var(--glad-border-accent);
 }
 
 #glad-arena-scanner button:disabled,
@@ -161,7 +213,7 @@ tr.glad-arena-best > td {
 }
 
 #glad-arena-scanner .glad-arena-status {
-  color: #c8aa74;
+  color: var(--glad-text-muted);
   margin-left: auto;
 }
 
@@ -170,9 +222,10 @@ tr.glad-arena-best > td {
 }
 
 #glad-arena-passive-status {
-  background: #24180f;
-  border: 1px solid #7b5b32;
-  color: #f3ddb2;
+  background: var(--glad-bg-surface);
+  border: 1px solid var(--glad-border);
+  border-radius: var(--glad-radius-md);
+  color: var(--glad-text-main);
   display: grid;
   gap: 4px;
   margin: 8px 0;
@@ -188,13 +241,13 @@ tr.glad-arena-best > td {
 }
 
 .glad-arena-passive-status-row strong {
-  color: #ffd98a;
+  color: var(--glad-text-accent);
   grid-column: 1;
   grid-row: 1;
 }
 
 .glad-arena-passive-status-message {
-  color: #c8aa74;
+  color: var(--glad-text-muted);
   display: block;
   grid-column: 1 / -1;
   grid-row: 2;
@@ -203,9 +256,10 @@ tr.glad-arena-best > td {
 
 .glad-arena-passive-status-badge {
   align-items: center;
-  background: #3b2817;
-  border: 1px solid #7b5b32;
-  color: #c8aa74;
+  background: var(--glad-bg-elevated);
+  border: 1px solid var(--glad-border-light);
+  border-radius: var(--glad-radius-sm);
+  color: var(--glad-text-muted);
   display: inline-flex;
   font-size: 10px;
   font-weight: 700;
@@ -233,7 +287,7 @@ tr.glad-arena-best > td {
 
 .glad-arena-passive-status-scanning .glad-arena-passive-status-message,
 .glad-arena-passive-status-checking .glad-arena-passive-status-message {
-  color: #ffe6ae;
+  color: var(--glad-text-highlight);
 }
 
 .glad-arena-passive-status-ready .glad-arena-passive-status-message {
@@ -247,6 +301,7 @@ tr.glad-arena-best > td {
 .glad-arena-passive-status-ready .glad-arena-passive-status-badge {
   border-color: #7f9654;
   color: #d9e7a4;
+  background: #1b2612;
 }
 
 .glad-arena-passive-status-ready .glad-arena-passive-status-badge::before {
@@ -256,7 +311,8 @@ tr.glad-arena-best > td {
 .glad-arena-passive-status-scanning .glad-arena-passive-status-badge,
 .glad-arena-passive-status-checking .glad-arena-passive-status-badge {
   border-color: #b98943;
-  color: #ffe6ae;
+  color: var(--glad-text-highlight);
+  background: #2a200e;
 }
 
 .glad-arena-passive-status-scanning .glad-arena-passive-status-badge::before,
@@ -267,6 +323,7 @@ tr.glad-arena-best > td {
 .glad-arena-passive-status-error .glad-arena-passive-status-badge {
   border-color: #9d3f32;
   color: #ffb4a8;
+  background: #2b110e;
 }
 
 .glad-arena-passive-status-error .glad-arena-passive-status-badge::before {
@@ -275,7 +332,7 @@ tr.glad-arena-best > td {
 
 /* Costume tier badges */
 .glad-arena-costume {
-  border-radius: 3px;
+  border-radius: var(--glad-radius-sm);
   display: inline-block;
   font-size: 9px;
   font-weight: 700;
@@ -289,19 +346,19 @@ tr.glad-arena-best > td {
 }
 
 .glad-arena-costume-easy {
-  background: rgba(50, 120, 50, 0.35);
+  background: #112a11;
   border: 1px solid #5ea55e;
   color: #b4e8b4;
 }
 
 .glad-arena-costume-medium {
-  background: rgba(160, 120, 30, 0.35);
+  background: #2a220e;
   border: 1px solid #c8a43a;
   color: #ffe6a1;
 }
 
 .glad-arena-costume-hard {
-  background: rgba(160, 50, 40, 0.35);
+  background: #2b110e;
   border: 1px solid #c5504a;
   color: #ffb4a8;
 }

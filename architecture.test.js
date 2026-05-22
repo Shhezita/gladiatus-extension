@@ -929,14 +929,14 @@ async function runBackgroundScannerTests() {
   storage[cacheKey].single.checkedAt = old;
   storage[cacheKey].single.result.scannedAt = old;
   const profileCallsBeforeUnchanged = calls.filter(isProfileFetch).length;
-  const unchanged = await scanner.passiveCheck({ url: singleArenaUrl, preferredKind: "single" });
-  assert.equal(unchanged.find((result) => result.kind === "single").skipped, "unchanged");
-  assert.equal(calls.filter(isProfileFetch).length, profileCallsBeforeUnchanged);
-  assert.equal(storage[statusKey].single.message, "Ready, opponent list unchanged");
+  const rescanned = await scanner.passiveCheck({ url: singleArenaUrl, preferredKind: "single" });
+  assert.equal(rescanned.find((result) => result.kind === "single").scanned, true);
+  assert.ok(calls.filter(isProfileFetch).length > profileCallsBeforeUnchanged);
+  assert.equal(storage[statusKey].single.message, "Ready");
 
   const fresh = await scanner.passiveCheck({ url: singleArenaUrl, preferredKind: "single" });
-  assert.equal(fresh.find((result) => result.kind === "single").skipped, "fresh");
-  assert.equal(storage[statusKey].single.message, "Ready, checked recently");
+  assert.equal(fresh.find((result) => result.kind === "single").skipped, "quiet");
+  assert.equal(storage[statusKey].single.message, "Ready, quiet phase");
 
   const changedEntries = scanner.readArenaOpponentEntriesFromHtml(changedSingleList, singleArenaUrl);
   const profileCallsBeforeVisible = calls.filter(isProfileFetch).length;

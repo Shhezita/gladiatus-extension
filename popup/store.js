@@ -192,7 +192,6 @@ export async function notifyActivePageDefinitionsChanged() {
       definitions: state.customDefinitions
     });
   } catch {
-    // The active tab does not need to be a Gladiatus auction page.
   }
 }
 
