@@ -31,8 +31,38 @@
     return { ...definition };
   }
 
-  function defineMinimumStatFilter({ id, label, statKey, defaultValue = 0, min = 0, step = 1 }) {
-    return {
+  function defineMinimumStatFilter({ id, label, statKey, options, defaultStat, defaultValue = 0, min = 0, step = 1 }) {
+    if (options) {
+      return [
+        {
+          id: `${id}_stat`,
+          label: `${label} stat`,
+          defaultValue: defaultStat || options[0].value,
+          type: "select",
+          options,
+          predicate: () => true,
+          describe: () => null
+        },
+        {
+          id: `${id}_val`,
+          label: `${label} value`,
+          defaultValue,
+          min,
+          step,
+          type: "number",
+          predicate: (item, value, allValues) => {
+            const selectedStat = allValues[`${id}_stat`] || defaultStat || options[0].value;
+            return stat(item, selectedStat) >= numericFilterValue(value, defaultValue);
+          },
+          describe: (value, allValues) => {
+            const selectedStat = allValues[`${id}_stat`] || defaultStat || options[0].value;
+            const statLabel = options.find(o => o.value === selectedStat)?.label || selectedStat;
+            return `${statLabel}: ${formatNumber(numericFilterValue(value, defaultValue))}+`;
+          }
+        }
+      ];
+    }
+    return [{
       id,
       label,
       defaultValue,
@@ -41,7 +71,7 @@
       type: "number",
       predicate: (item, value) => stat(item, statKey) >= numericFilterValue(value, defaultValue),
       describe: (value) => `${label}: ${formatNumber(numericFilterValue(value, defaultValue))}+`
-    };
+    }];
   }
 
   const VIEW_DEFINITIONS = [
@@ -69,10 +99,15 @@
         defineScorePreset({ id: "threat", label: "Threat", score: (item) => stat(item, "threat") })
       ],
       filters: [
-        defineMinimumStatFilter({
-          id: "minDamageBonus",
-          label: "Min bonus damage",
-          statKey: "damageBonus"
+        ...defineMinimumStatFilter({
+          id: "armorFilter",
+          label: "Min stat filter",
+          options: [
+            { value: "damageBonus", label: "Min damage" },
+            { value: "blockvalue", label: "Block value" },
+            { value: "hardeningvalue", label: "Hardening value" }
+          ],
+          defaultStat: "damageBonus"
         })
       ]
     }),

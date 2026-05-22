@@ -207,7 +207,8 @@
     const panel = h("div", {
       id: STATUS_BOX_ID,
       ariaLive: "polite",
-      ariaLabel: "Arena and Circus scan status"
+      ariaLabel: "Arena and Circus scan status",
+      style: { position: "relative" }
     });
     if (!insertStatusBox(panel)) return null;
     return panel;
@@ -259,13 +260,53 @@
     chrome.storage.onChanged.addListener(root.__GladiatusArenaStatusBoxListener);
   }
 
+  let isStatusBoxCollapsed = root.sessionStorage?.getItem("glad-arena-passive-collapsed") === "true";
+
   function renderStatusBox(rawStatus) {
     if (!shouldRenderStatusBox()) return;
     const panel = ensureStatusBox();
     if (!panel) return;
 
+    root.__GladArenaLastRawStatus = rawStatus;
     const status = normalizeStatusCache(rawStatus);
-    panel.replaceChildren(...STATUS_KINDS.map((kind) => renderStatusRow(kind, status[kind])));
+
+    const toggleCollapse = () => {
+      isStatusBoxCollapsed = !isStatusBoxCollapsed;
+      try { root.sessionStorage?.setItem("glad-arena-passive-collapsed", String(isStatusBoxCollapsed)); } catch (e) {}
+      renderStatusBox(root.__GladArenaLastRawStatus);
+    };
+
+    if (isStatusBoxCollapsed) {
+      let overallState = "ready";
+      if (status.single.state === "error" || status.team.state === "error") overallState = "error";
+      else if (status.single.state === "scanning" || status.team.state === "scanning" || status.single.state === "checking" || status.team.state === "checking") overallState = "scanning";
+
+      const pseudoRecord = { state: overallState };
+
+      const headerDiv = h("div", { 
+        style: { display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", padding: "2px 0" },
+        onclick: toggleCollapse
+      }, 
+        h("div", { style: { display: "flex", alignItems: "center", gap: "6px" } },
+          h("strong", { style: { color: "var(--glad-border-focus)", fontSize: "11px", textTransform: "uppercase" }, textContent: "SCANNER" }),
+          h("div", { className: `glad-arena-passive-status-${overallState}`, style: { display: "flex", margin: 0, padding: 0 } }, 
+            h("span", { className: "glad-arena-passive-status-badge", textContent: statusBadgeText(pseudoRecord) })
+          )
+        ),
+        h("span", { style: { color: "var(--glad-text-muted)", fontSize: "10px" }, textContent: "▼" })
+      );
+      panel.replaceChildren(headerDiv);
+      return;
+    }
+
+    const headerDiv = h("div", { 
+      style: { position: "absolute", top: "4px", right: "6px", cursor: "pointer", zIndex: 10 },
+      onclick: toggleCollapse
+    }, 
+      h("span", { style: { color: "var(--glad-text-muted)", fontSize: "12px", padding: "4px" }, textContent: "▲" })
+    );
+
+    panel.replaceChildren(headerDiv, ...STATUS_KINDS.map((kind) => renderStatusRow(kind, status[kind])));
   }
 
   function renderStatusRow(kind, record) {
@@ -319,10 +360,7 @@
     if (record.state === "checking") return cleanStatusMessage(record.message || "Checking opponent list");
 
     if (record.state === "ready") {
-      const age = formatAge(record.scannedAt);
-      const message = cleanStatusMessage(record.message || "Ready");
-      if (!age) return message;
-      return age === "just now" ? `${message} - scanned just now` : `${message} - scanned ${age} ago`;
+      return cleanStatusMessage(record.message || "Ready");
     }
 
     if (record.state === "error") {
