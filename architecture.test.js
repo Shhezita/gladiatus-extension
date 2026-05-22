@@ -109,6 +109,13 @@ function makeBackgroundScannerContext(options = {}) {
       return 1;
     },
     clearTimeout() {},
+    navigator: {
+      locks: {
+        async request(name, callback) {
+          return callback();
+        }
+      }
+    },
     chrome: {
       storage: {
         local: {
@@ -363,9 +370,10 @@ const { schema, score, model, core, arena } = loadGlobals();
   const isolatedEntries = manifest.content_scripts.filter((entry) => entry.world !== "MAIN");
 
   assert.equal(manifest.background.service_worker, "background.js");
-  assert.match(backgroundSource, /importScripts\("score-model\.js", "arena-core\.js", "arena-background-scan\.js"\);/);
+  assert.match(backgroundSource, /importScripts\("score-model\.js", "arena-core\.js", "arena-simulator\.js", "arena-background-scan\.js"\);/);
   assert.ok(backgroundSource.indexOf("score-model.js") < backgroundSource.indexOf("arena-core.js"));
-  assert.ok(backgroundSource.indexOf("arena-core.js") < backgroundSource.indexOf("arena-background-scan.js"));
+  assert.ok(backgroundSource.indexOf("arena-core.js") < backgroundSource.indexOf("arena-simulator.js"));
+  assert.ok(backgroundSource.indexOf("arena-simulator.js") < backgroundSource.indexOf("arena-background-scan.js"));
   const repairFiles = backgroundSource.match(/const AUCTION_CONTENT_FILES = \[([\s\S]*?)\];/)?.[1] || "";
   assert.ok(repairFiles.indexOf("\"arena-scan.js\"") < repairFiles.indexOf("\"arena-content.js\""));
   assert.equal(repairFiles.includes("arena-background-scan.js"), false);
@@ -377,6 +385,7 @@ const { schema, score, model, core, arena } = loadGlobals();
     "auction-model.js",
     "auction-core.js",
     "arena-core.js",
+    "arena-simulator.js",
     "arena-scan.js",
     "auction-content.js",
     "arena-content.js"
@@ -572,16 +581,16 @@ const { schema, score, model, core, arena } = loadGlobals();
 }
 
 {
-  const filters = model.normalizeAllFilterValues({ armor: { minDamageBonus: "5" } });
+  const filters = model.normalizeAllFilterValues({ armor: { armorFilter_val: 5 } });
   assert.equal(schema.storageKeys.filterValues, "glad-ah-filter-values-v1");
-  assert.equal(filters.armor.minDamageBonus, "5");
-  assert.equal(model.filterValuesEqual(filters, { armor: { minDamageBonus: "5" } }), true);
+  assert.equal(filters.armor.armorFilter_val, 5);
+  assert.equal(model.filterValuesEqual(filters, { armor: { armorFilter_val: 5 } }), true);
   assert.equal(model.itemMatchesFilters({ viewId: "armor", stats: { damageBonus: 6 } }, "armor", filters.armor), true);
   assert.equal(model.itemMatchesFilters({ viewId: "armor", stats: { damageBonus: 4 } }, "armor", filters.armor), false);
 
-  const [control] = model.getFilterControlDescriptors("armor", filters.armor);
-  assert.equal(control.id, "minDamageBonus");
-  assert.equal(control.value, "5");
+  const controls = model.getFilterControlDescriptors("armor", filters.armor);
+  assert.equal(controls[1].id, "armorFilter_val");
+  assert.equal(controls[1].value, 5);
 }
 
 {

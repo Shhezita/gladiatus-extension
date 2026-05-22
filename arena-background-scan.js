@@ -5,13 +5,13 @@
   if (!ARENA || root.GladiatusArenaBackgroundScanner) return;
 
   const POPUP_STATE_KEY = "glad-ah-popup-state-v1";
-  const FULL_SCAN_QUIET_MS = 10 * 60 * 1000;
+  const FULL_SCAN_QUIET_MS = 3 * 60 * 1000;
   const LIST_CHECK_INTERVAL_MS = 3 * 60 * 1000;
   const LOCK_TIMEOUT_MS = 5 * 60 * 1000;
   const MANUAL_SCAN_DELAY_MS = 150;
   const PASSIVE_SCAN_DELAY_MS = 900;
   const SCAN_CONCURRENCY = 2;
-  const CACHE_TTL_MS = 10 * 60 * 1000;
+  const CACHE_TTL_MS = 3 * 60 * 1000;
   const RETRYABLE_PROFILE_STATUSES = new Set([429, 500, 502, 503, 504]);
   const LOG_PREFIX = "[Gladiatus Background Scanner]";
   const KINDS = ["team", "single"];
@@ -344,35 +344,38 @@
     }
 
     try {
-      const result = await scanEntries(entries, formula, {
-        arenaKind: kind,
-        sourceUrl: options.sourceUrl || listUrl,
-        fingerprint,
-        scanSource: options.scanSource || "unknown",
-        delayMs: Number(options.delayMs) || PASSIVE_SCAN_DELAY_MS,
-        concurrency: Number(options.concurrency) || SCAN_CONCURRENCY
-      });
-      await saveCachedResult(kind, {
-        listUrl,
-        checkedAt,
-        scannedAt: result.scannedAt,
-        fingerprint,
-        formulaFingerprint: formulaKey,
-        result,
-        lastError: ""
-      });
-      if (options.updateLastResult !== false) await saveLastResult(result);
-      await updateScanStatus(kind, {
-        state: "ready",
-        source: options.scanSource || "unknown",
-        message: "Ready",
-        checkedAt,
-        scannedAt: result.scannedAt,
-        opponentDone: result.opponentCount,
-        opponentTotal: result.opponentCount,
-        profileDone: defaultProfileTotal(kind, result.opponentCount),
-        profileTotal: defaultProfileTotal(kind, result.opponentCount),
-        lastError: ""
+      const result = await navigator.locks.request("gladiatus-scan", async () => {
+        const scanResult = await scanEntries(entries, formula, {
+          arenaKind: kind,
+          sourceUrl: options.sourceUrl || listUrl,
+          fingerprint,
+          scanSource: options.scanSource || "unknown",
+          delayMs: Number(options.delayMs) || PASSIVE_SCAN_DELAY_MS,
+          concurrency: Number(options.concurrency) || SCAN_CONCURRENCY
+        });
+        await saveCachedResult(kind, {
+          listUrl,
+          checkedAt,
+          scannedAt: scanResult.scannedAt,
+          fingerprint,
+          formulaFingerprint: formulaKey,
+          result: scanResult,
+          lastError: ""
+        });
+        if (options.updateLastResult !== false) await saveLastResult(scanResult);
+        await updateScanStatus(kind, {
+          state: "ready",
+          source: options.scanSource || "unknown",
+          message: "Ready",
+          checkedAt,
+          scannedAt: scanResult.scannedAt,
+          opponentDone: scanResult.opponentCount,
+          opponentTotal: scanResult.opponentCount,
+          profileDone: defaultProfileTotal(kind, scanResult.opponentCount),
+          profileTotal: defaultProfileTotal(kind, scanResult.opponentCount),
+          lastError: ""
+        });
+        return scanResult;
       });
       return { result, scanned: true };
     } catch (error) {
@@ -1027,22 +1030,44 @@
     return fetchGladiatusHtml(normalizeArenaListUrl(url), "Arena list");
   }
 
+  let circuitBreakerFailures = 0;
+  let circuitBreakerUntil = 0;
+
   async function fetchGladiatusHtml(url, label) {
+    if (Date.now() < circuitBreakerUntil) {
+      throw new Error("Network pause active due to repeated failures.");
+    }
+
     let lastStatus = 0;
 
     for (let attempt = 0; attempt < 4; attempt += 1) {
-      const response = await fetch(url.href, { credentials: "include" });
-      if (response.ok) {
-        return response.text();
-      }
+      const startTime = Date.now();
+      try {
+        const response = await fetch(url.href, { credentials: "include" });
+        const responseTime = Date.now() - startTime;
 
-      lastStatus = response.status;
-      if (!RETRYABLE_PROFILE_STATUSES.has(response.status) || attempt === 3) {
-        throw new Error(`${label} fetch failed with HTTP ${response.status}.`);
-      }
+        if (response.ok) {
+          circuitBreakerFailures = 0;
+          return await response.text();
+        }
 
-      const waitMs = response.status === 429 ? 1500 : 500 * (attempt + 1);
-      await delay(waitMs);
+        lastStatus = response.status;
+        if (!RETRYABLE_PROFILE_STATUSES.has(response.status) || attempt === 3) {
+          throw new Error(`${label} fetch failed with HTTP ${response.status}.`);
+        }
+
+        const waitMs = response.status === 429 ? 1500 : Math.max(500 * (attempt + 1), responseTime);
+        await delay(waitMs);
+      } catch (err) {
+        if (attempt === 3) {
+          circuitBreakerFailures++;
+          if (circuitBreakerFailures >= 4) {
+            circuitBreakerUntil = Date.now() + 30000;
+          }
+          throw err;
+        }
+        await delay(500 * (attempt + 1));
+      }
     }
     throw new Error(`${label} fetch failed with HTTP ${lastStatus || "unknown"}.`);
   }
