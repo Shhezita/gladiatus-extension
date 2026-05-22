@@ -21,21 +21,34 @@ import {
   validateDefinition
 } from "./store.js";
 
+function h(tag, props, ...children) {
+  const el = document.createElement(tag);
+  if (props) {
+    for (const [key, value] of Object.entries(props)) {
+      if (key === "className") el.className = value;
+      else if (key === "dataset") Object.assign(el.dataset, value);
+      else if (key === "style" && typeof value === "object") Object.assign(el.style, value);
+      else if (key.startsWith("on") && typeof value === "function") el.addEventListener(key.slice(2).toLowerCase(), value);
+      else if (key === "html") el.innerHTML = value;
+      else el[key] = value;
+    }
+  }
+  for (const child of children.flat(Infinity)) {
+    if (child != null && child !== false) {
+      el.append(child instanceof Node ? child : document.createTextNode(String(child)));
+    }
+  }
+  return el;
+}
+
 export function createAuctionView({ render, applyCurrentSortToPage }) {
   function renderPageTabs() {
     nodes.pageTabs.hidden = false;
-    const fragment = document.createDocumentFragment();
-
-    for (const page of PAGE_DEFINITIONS) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = page.id === state.popupState.pageId ? "active" : "";
-      button.dataset.pageId = page.id;
-      button.textContent = page.label;
-      fragment.append(button);
-    }
-
-    nodes.pageTabs.replaceChildren(fragment);
+    nodes.pageTabs.replaceChildren(...PAGE_DEFINITIONS.map(page => h("button", {
+      type: "button",
+      className: page.id === state.popupState.pageId ? "active" : "",
+      dataset: { pageId: page.id }
+    }, page.label)));
   }
 
   function renderItemsPage() {
@@ -87,110 +100,81 @@ export function createAuctionView({ render, applyCurrentSortToPage }) {
   }
 
   function renderItemTabs(items) {
-    const fragment = document.createDocumentFragment();
-
-    for (const view of VIEW_DEFINITIONS) {
+    nodes.tabs.replaceChildren(...VIEW_DEFINITIONS.map(view => {
       const count = items.filter(view.accepts).length;
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = view.id === state.popupState.viewId ? "active" : "";
-      button.dataset.viewId = view.id;
-      button.textContent = `${view.label} ${count}`;
-      fragment.append(button);
-    }
-
-    nodes.tabs.replaceChildren(fragment);
+      return h("button", {
+        type: "button",
+        className: view.id === state.popupState.viewId ? "active" : "",
+        dataset: { viewId: view.id }
+      }, `${view.label} ${count}`);
+    }));
   }
 
   function renderControls() {
     const view = getView();
     const selectedPresetId = getSelectedPreset(view).id;
-    const fragment = document.createDocumentFragment();
+    const controls = [];
 
-    renderArmorPieceControl(fragment, view);
+    const armorPiece = renderArmorPieceControl(view);
+    if (armorPiece) controls.push(armorPiece);
 
-    const label = document.createElement("span");
-    label.className = "control-label";
-    label.textContent = "Sort";
-    fragment.append(label);
+    controls.push(h("span", { className: "control-label" }, "Sort"));
 
     for (const preset of getPresetOptions(view)) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = preset.id === selectedPresetId ? "active" : "";
-      button.dataset.presetId = preset.id;
-      button.textContent = preset.label;
-      fragment.append(button);
+      controls.push(h("button", {
+        type: "button",
+        className: preset.id === selectedPresetId ? "active" : "",
+        dataset: { presetId: preset.id }
+      }, preset.label));
     }
 
-    renderFilterControls(fragment, view);
-    nodes.controls.replaceChildren(fragment);
+    const filterControls = renderFilterControls(view);
+    if (filterControls) controls.push(filterControls);
+
+    nodes.controls.replaceChildren(...controls);
   }
 
-  function renderArmorPieceControl(fragment, view) {
-    if (view.id !== "armor") return;
+  function renderArmorPieceControl(view) {
+    if (view.id !== "armor") return null;
 
     const items = (state.scanResult?.items || []).filter(view.accepts);
     const selected = getSelectedArmorPiece();
-    const label = document.createElement("label");
-    label.className = "filter-control";
+    
+    const options = [
+      h("option", { value: "" }, `All armor ${items.length}`),
+      ...ARMOR_PIECE_OPTIONS.map(piece => {
+        const count = items.filter((item) => String(item.itemType || "") === piece.itemType).length;
+        return h("option", { value: piece.itemType }, `${piece.label} ${count}`);
+      })
+    ];
 
-    const text = document.createElement("span");
-    text.textContent = "Piece";
-
-    const select = document.createElement("select");
-    select.dataset.armorPiece = "1";
-
-    const all = document.createElement("option");
-    all.value = "";
-    all.textContent = `All armor ${items.length}`;
-    select.append(all);
-
-    for (const piece of ARMOR_PIECE_OPTIONS) {
-      const count = items.filter((item) => String(item.itemType || "") === piece.itemType).length;
-      const option = document.createElement("option");
-      option.value = piece.itemType;
-      option.textContent = `${piece.label} ${count}`;
-      select.append(option);
-    }
-
-    select.value = selected;
-    label.append(text, select);
-    fragment.append(label);
-
-    const separator = document.createElement("span");
-    separator.className = "control-separator";
-    separator.textContent = "|";
-    fragment.append(separator);
+    return h("span", {},
+      h("label", { className: "filter-control" },
+        h("span", {}, "Piece"),
+        h("select", { dataset: { armorPiece: "1" }, value: selected }, ...options)
+      ),
+      h("span", { className: "control-separator" }, "|")
+    );
   }
 
-  function renderFilterControls(fragment, view) {
+  function renderFilterControls(view) {
     const filterValues = getFilterValues(view.id);
     const controls = MODEL.getFilterControlDescriptors(view.id, filterValues);
-    if (!controls.length) return;
+    if (!controls.length) return null;
 
-    const separator = document.createElement("span");
-    separator.className = "control-separator";
-    separator.textContent = "|";
-    fragment.append(separator);
-
-    for (const filter of controls) {
-      const label = document.createElement("label");
-      label.className = "filter-control";
-
-      const text = document.createElement("span");
-      text.textContent = filter.label;
-
-      const input = document.createElement("input");
-      input.type = filter.type;
-      input.min = String(filter.min);
-      input.step = String(filter.step);
-      input.dataset.filterId = filter.id;
-      input.value = filter.value;
-
-      label.append(text, input);
-      fragment.append(label);
-    }
+    return h("span", {},
+      h("span", { className: "control-separator" }, "|"),
+      ...controls.map(filter => h("label", { className: "filter-control" },
+        h("span", {}, filter.label),
+        h("input", {
+          type: filter.type,
+          min: String(filter.min),
+          step: String(filter.step),
+          dataset: { filterId: filter.id },
+          value: filter.value
+        })
+      ))
+    );
   }
 
   function renderItems() {
@@ -216,32 +200,13 @@ export function createAuctionView({ render, applyCurrentSortToPage }) {
       return;
     }
 
-    const fragment = document.createDocumentFragment();
-    for (const entry of items) {
-      fragment.append(renderItem(entry.item, MODEL.formatScore(preset, entry.item, entry.score)));
-    }
-    nodes.results.replaceChildren(fragment);
+    nodes.results.replaceChildren(...items.map(entry => renderItem(entry.item, MODEL.formatScore(preset, entry.item, entry.score))));
   }
 
   function renderItem(item, scoreText) {
-    const node = document.createElement("article");
-    node.className = "item";
-
     const thumb = renderThumb(item);
-    const detail = document.createElement("div");
-    detail.className = "item-detail";
-
-    const name = document.createElement("div");
-    name.className = "item-name";
-    name.textContent = item.name || "Unknown item";
-
-    const scoreNode = document.createElement("div");
-    scoreNode.className = "score";
-    scoreNode.textContent = scoreText;
-
-    const meta = document.createElement("div");
-    meta.className = "meta";
-    meta.textContent = [
+    
+    const meta = h("div", { className: "meta" }, [
       item.category,
       item.level ? `Level ${item.level}` : "",
       item.itemValue ? `Value ${item.itemValue}` : "",
@@ -249,301 +214,171 @@ export function createAuctionView({ render, applyCurrentSortToPage }) {
       MODEL.stat(item, "foodHealing") && MODEL.price(item)
         ? `Heals/gold ${MODEL.formatNumber(MODEL.stat(item, "foodHealing") / MODEL.price(item))}`
         : ""
-    ].filter(Boolean).join(" | ");
+    ].filter(Boolean).join(" | "));
 
-    const stats = document.createElement("div");
-    stats.className = "stats";
-    stats.textContent = MODEL.formatStats(item.stats || {});
+    const stats = h("div", { className: "stats" }, MODEL.formatStats(item.stats || {}));
 
-    detail.append(name, scoreNode, meta, stats);
-    node.append(thumb, detail);
-    return node;
+    const detail = h("div", { className: "item-detail" },
+      h("div", { className: "item-name" }, item.name || "Unknown item"),
+      h("div", { className: "score" }, scoreText),
+      meta,
+      stats
+    );
+
+    return h("article", { className: "item" }, thumb, detail);
   }
 
   function renderDefinitionManager() {
-    const container = document.createElement("section");
-    container.className = "definition-page";
-
-    const editor = renderDefinitionEditor();
-    const list = renderDefinitionList();
-    container.append(editor, list);
-    return container;
+    return h("section", { className: "definition-page" },
+      renderDefinitionEditor(),
+      renderDefinitionList()
+    );
   }
 
   function renderDefinitionEditor() {
-    const editor = document.createElement("section");
-    editor.id = "filter-editor";
-    editor.className = "definition-editor";
-    editor.dataset.definitionId = state.editorDraft.id;
-
-    const title = document.createElement("h2");
-    title.textContent = state.editorDraft.isNew ? "New custom filter" : "Edit custom filter";
-
-    const nameLabel = document.createElement("label");
-    nameLabel.className = "field-row";
-    nameLabel.textContent = "Name";
-    const nameInput = document.createElement("input");
-    nameInput.name = "name";
-    nameInput.type = "text";
-    nameInput.value = state.editorDraft.name;
-    nameLabel.append(nameInput);
-
-    const enabledLabel = document.createElement("label");
-    enabledLabel.className = "check-row";
-    const enabledInput = document.createElement("input");
-    enabledInput.name = "enabled";
-    enabledInput.type = "checkbox";
-    enabledInput.checked = state.editorDraft.enabled !== false;
-    enabledLabel.append(enabledInput, document.createTextNode(" Enabled"));
-
-    const applies = renderAppliesToEditor(state.editorDraft);
-    const terms = renderTermsEditor(state.editorDraft);
-    const constraints = renderConstraintsEditor(state.editorDraft);
-    const actions = renderEditorActions(state.editorDraft);
-
-    editor.append(title, nameLabel, enabledLabel, applies, terms, constraints, actions);
-    return editor;
+    return h("section", { 
+      id: "filter-editor",
+      className: "definition-editor",
+      dataset: { definitionId: state.editorDraft.id }
+    },
+      h("h2", {}, state.editorDraft.isNew ? "New custom filter" : "Edit custom filter"),
+      h("label", { className: "field-row" }, 
+        "Name",
+        h("input", { name: "name", type: "text", value: state.editorDraft.name })
+      ),
+      h("label", { className: "check-row" },
+        h("input", { name: "enabled", type: "checkbox", checked: state.editorDraft.enabled !== false }),
+        " Enabled"
+      ),
+      renderAppliesToEditor(state.editorDraft),
+      renderTermsEditor(state.editorDraft),
+      renderConstraintsEditor(state.editorDraft),
+      renderEditorActions(state.editorDraft)
+    );
   }
 
   function renderAppliesToEditor(definition) {
-    const group = document.createElement("fieldset");
-    group.className = "editor-group";
-
-    const legend = document.createElement("legend");
-    legend.textContent = "Applies to";
-    group.append(legend);
-
-    for (const view of VIEW_DEFINITIONS) {
-      const label = document.createElement("label");
-      label.className = "check-row";
-
-      const input = document.createElement("input");
-      input.type = "checkbox";
-      input.name = "appliesTo";
-      input.value = view.id;
-      input.checked = definition.appliesTo.includes(view.id);
-
-      label.append(input, document.createTextNode(` ${view.label}`));
-      group.append(label);
-    }
-
-    return group;
+    return h("fieldset", { className: "editor-group" },
+      h("legend", {}, "Applies to"),
+      ...VIEW_DEFINITIONS.map(view => h("label", { className: "check-row" },
+        h("input", {
+          type: "checkbox",
+          name: "appliesTo",
+          value: view.id,
+          checked: definition.appliesTo.includes(view.id)
+        }),
+        ` ${view.label}`
+      ))
+    );
   }
 
   function renderTermsEditor(definition) {
-    const section = document.createElement("section");
-    section.className = "editor-group";
-
-    const heading = document.createElement("div");
-    heading.className = "editor-heading";
-    heading.textContent = "Score terms";
-    section.append(heading);
-
-    definition.terms.forEach((term, index) => {
-      section.append(renderTermRow(term, index));
-    });
-
-    const add = document.createElement("button");
-    add.type = "button";
-    add.dataset.action = "add-term";
-    add.textContent = "Add term";
-    section.append(add);
-    return section;
+    return h("section", { className: "editor-group" },
+      h("div", { className: "editor-heading" }, "Score terms"),
+      ...definition.terms.map((term, index) => renderTermRow(term, index)),
+      h("button", { type: "button", dataset: { action: "add-term" } }, "Add term")
+    );
   }
 
   function renderTermRow(term, index) {
-    const row = document.createElement("div");
-    row.className = "builder-row";
-    row.dataset.termIndex = String(index);
-
-    const stat = makeStatSelect("term-stat", term.stat);
-    const weight = document.createElement("input");
-    weight.name = "term-weight";
-    weight.type = "number";
-    weight.step = "0.1";
-    weight.value = String(term.weight);
-
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.dataset.action = "remove-term";
-    remove.dataset.index = String(index);
-    remove.textContent = "Remove";
-
-    row.append(stat, weight, remove);
-    return row;
+    return h("div", { className: "builder-row", dataset: { termIndex: String(index) } },
+      makeStatSelect("term-stat", term.stat),
+      h("input", {
+        name: "term-weight",
+        type: "number",
+        step: "0.1",
+        value: String(term.weight)
+      }),
+      h("button", {
+        type: "button",
+        dataset: { action: "remove-term", index: String(index) }
+      }, "Remove")
+    );
   }
 
   function renderConstraintsEditor(definition) {
-    const section = document.createElement("section");
-    section.className = "editor-group";
-
-    const heading = document.createElement("div");
-    heading.className = "editor-heading";
-    heading.textContent = "Constraints";
-    section.append(heading);
-
-    definition.constraints.forEach((constraint, index) => {
-      section.append(renderConstraintRow(constraint, index));
-    });
-
-    const add = document.createElement("button");
-    add.type = "button";
-    add.dataset.action = "add-constraint";
-    add.textContent = "Add constraint";
-    section.append(add);
-    return section;
+    return h("section", { className: "editor-group" },
+      h("div", { className: "editor-heading" }, "Constraints"),
+      ...definition.constraints.map((constraint, index) => renderConstraintRow(constraint, index)),
+      h("button", { type: "button", dataset: { action: "add-constraint" } }, "Add constraint")
+    );
   }
 
   function renderConstraintRow(constraint, index) {
-    const row = document.createElement("div");
-    row.className = "builder-row";
-    row.dataset.constraintIndex = String(index);
-
-    const stat = makeStatSelect("constraint-stat", constraint.stat);
-    const op = document.createElement("select");
-    op.name = "constraint-op";
-    [">=", "<="].forEach((operator) => {
-      const option = document.createElement("option");
-      option.value = operator;
-      option.textContent = operator;
-      op.append(option);
-    });
-    op.value = constraint.op;
-
-    const value = document.createElement("input");
-    value.name = "constraint-value";
-    value.type = "number";
-    value.step = "0.1";
-    value.value = String(constraint.value);
-
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.dataset.action = "remove-constraint";
-    remove.dataset.index = String(index);
-    remove.textContent = "Remove";
-
-    row.append(stat, op, value, remove);
-    return row;
+    return h("div", { className: "builder-row", dataset: { constraintIndex: String(index) } },
+      makeStatSelect("constraint-stat", constraint.stat),
+      h("select", { name: "constraint-op", value: constraint.op },
+        ...[">=", "<="].map(operator => h("option", { value: operator }, operator))
+      ),
+      h("input", {
+        name: "constraint-value",
+        type: "number",
+        step: "0.1",
+        value: String(constraint.value)
+      }),
+      h("button", {
+        type: "button",
+        dataset: { action: "remove-constraint", index: String(index) }
+      }, "Remove")
+    );
   }
 
   function renderEditorActions(definition) {
-    const actions = document.createElement("div");
-    actions.className = "editor-actions";
-
-    const save = document.createElement("button");
-    save.type = "button";
-    save.dataset.action = "save-definition";
-    save.textContent = definition.isNew ? "Create filter" : "Save filter";
-
-    const reset = document.createElement("button");
-    reset.type = "button";
-    reset.dataset.action = "new-definition";
-    reset.textContent = "New";
-
-    actions.append(save, reset);
-    return actions;
+    return h("div", { className: "editor-actions" },
+      h("button", { type: "button", dataset: { action: "save-definition" } }, definition.isNew ? "Create filter" : "Save filter"),
+      h("button", { type: "button", dataset: { action: "new-definition" } }, "New")
+    );
   }
 
   function renderDefinitionList() {
-    const list = document.createElement("section");
-    list.className = "definition-list";
-
-    const title = document.createElement("h2");
-    title.textContent = "Saved filters";
-    list.append(title);
-
-    if (!state.customDefinitions.length) {
-      const empty = document.createElement("div");
-      empty.className = "empty";
-      empty.textContent = "No custom filters yet.";
-      list.append(empty);
-      return list;
-    }
-
-    for (const definition of state.customDefinitions) {
-      list.append(renderDefinitionCard(definition));
-    }
-
-    return list;
+    return h("section", { className: "definition-list" },
+      h("h2", {}, "Saved filters"),
+      state.customDefinitions.length 
+        ? state.customDefinitions.map(def => renderDefinitionCard(def))
+        : h("div", { className: "empty" }, "No custom filters yet.")
+    );
   }
 
   function renderDefinitionCard(definition) {
-    const card = document.createElement("article");
-    card.className = "definition-card";
-
-    const title = document.createElement("div");
-    title.className = "definition-title";
-    title.textContent = definition.name;
-
-    const enabled = document.createElement("label");
-    enabled.className = "check-row";
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = definition.enabled;
-    checkbox.dataset.action = "toggle-definition";
-    checkbox.dataset.definitionId = definition.id;
-    enabled.append(checkbox, document.createTextNode(" Enabled"));
-
-    const appliesTo = document.createElement("div");
-    appliesTo.className = "definition-meta";
-    appliesTo.textContent = definition.appliesTo
-      .map((viewId) => MODEL.getView(viewId)?.label)
-      .filter(Boolean)
-      .join(", ");
-
-    const formula = document.createElement("div");
-    formula.className = "definition-formula";
-    formula.textContent = MODEL.summarizeCustomDefinition(definition);
-
-    const actions = document.createElement("div");
-    actions.className = "definition-actions";
-
-    const edit = document.createElement("button");
-    edit.type = "button";
-    edit.dataset.action = "edit-definition";
-    edit.dataset.definitionId = definition.id;
-    edit.textContent = "Edit";
-
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.dataset.action = "delete-definition";
-    remove.dataset.definitionId = definition.id;
-    remove.textContent = "Delete";
-
-    actions.append(edit, remove);
-    card.append(title, enabled, appliesTo, formula, actions);
-    return card;
+    return h("article", { className: "definition-card" },
+      h("div", { className: "definition-title" }, definition.name),
+      h("label", { className: "check-row" },
+        h("input", {
+          type: "checkbox",
+          checked: definition.enabled,
+          dataset: { action: "toggle-definition", definitionId: definition.id }
+        }),
+        " Enabled"
+      ),
+      h("div", { className: "definition-meta" },
+        definition.appliesTo
+          .map((viewId) => MODEL.getView(viewId)?.label)
+          .filter(Boolean)
+          .join(", ")
+      ),
+      h("div", { className: "definition-formula" }, MODEL.summarizeCustomDefinition(definition)),
+      h("div", { className: "definition-actions" },
+        h("button", { type: "button", dataset: { action: "edit-definition", definitionId: definition.id } }, "Edit"),
+        h("button", { type: "button", dataset: { action: "delete-definition", definitionId: definition.id } }, "Delete")
+      )
+    );
   }
 
   function makeStatSelect(name, selected) {
-    const select = document.createElement("select");
-    select.name = name;
-
-    for (const stat of MODEL.statOptions) {
-      const option = document.createElement("option");
-      option.value = stat.key;
-      option.textContent = stat.label;
-      select.append(option);
-    }
-
-    select.value = selected;
-    return select;
+    return h("select", { name, value: selected },
+      ...MODEL.statOptions.map(stat => h("option", { value: stat.key }, stat.label))
+    );
   }
 
   function renderThumb(item) {
-    const thumb = document.createElement("div");
-    thumb.className = "item-thumb";
-    thumb.title = item.name || "";
-
+    const thumb = h("div", { className: "item-thumb", title: item.name || "" });
     applyIconStyle(thumb, item.imageStyle || "");
     if (item.imageSrc) {
       thumb.style.backgroundImage = `url("${String(item.imageSrc).replace(/"/g, "%22")}")`;
     }
-
     if (!thumb.style.backgroundImage) {
       thumb.textContent = (item.name || "?").trim().slice(0, 1);
     }
-
     return thumb;
   }
 

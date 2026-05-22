@@ -43,6 +43,26 @@
     }
   }
 
+  function h(tag, props, ...children) {
+    const el = document.createElement(tag);
+    if (props) {
+      for (const [key, value] of Object.entries(props)) {
+        if (key === "className") el.className = value;
+        else if (key === "dataset") Object.assign(el.dataset, value);
+        else if (key === "style" && typeof value === "object") Object.assign(el.style, value);
+        else if (key.startsWith("on") && typeof value === "function") el.addEventListener(key.slice(2).toLowerCase(), value);
+        else if (key === "html") el.innerHTML = value;
+        else el[key] = value;
+      }
+    }
+    for (const child of children.flat(Infinity)) {
+      if (child != null && child !== false) {
+        el.append(child instanceof Node ? child : document.createTextNode(String(child)));
+      }
+    }
+    return el;
+  }
+
   function getMissingDependencies() {
     const dependencies = getDependencies();
     const missing = [];
@@ -533,7 +553,7 @@
     items.forEach((item, index) => {
       item.cell.classList.remove("glad-ah-filtered-hidden");
       if (index % 2 === 0) {
-        row = document.createElement("tr");
+        row = h("tr");
         fragment.append(row);
       }
       row.append(item.cell);
@@ -544,15 +564,11 @@
   function appendHiddenStash(items, tbody) {
     if (!items.length) return;
 
-    const row = document.createElement("tr");
-    row.className = "glad-ah-filter-stash";
-
     items.forEach((item) => {
       item.cell.classList.add("glad-ah-filtered-hidden");
-      row.append(item.cell);
     });
 
-    tbody.append(row);
+    tbody.append(h("tr", { className: "glad-ah-filter-stash" }, ...items.map(item => item.cell)));
   }
 
   function clearBadges(items) {
@@ -569,11 +585,12 @@
       if (!target) return;
 
       const score = option.get(item);
-      const badge = document.createElement("div");
-      badge.className = BADGE_CLASS;
-      badge.textContent = option.display ? option.display(item, score) : `${formatScore(score)} ${option.label}`;
-      badge.title = item.name;
-      target.append(badge);
+      const text = option.display ? option.display(item, score) : `${formatScore(score)} ${option.label}`;
+      
+      target.append(h("div", { 
+        className: BADGE_CLASS, 
+        title: item.name 
+      }, text));
     });
   }
 
@@ -587,32 +604,24 @@
   }
 
   function makeSelect() {
-    const select = document.createElement("select");
-    select.id = "glad-ah-sort-field";
-    renderSortSelectOptions(select);
-    select.addEventListener("change", () => {
-      applySortSelection(select.value);
+    const select = h("select", { 
+      id: "glad-ah-sort-field",
+      onchange: (e) => applySortSelection(e.target.value)
     });
+    renderSortSelectOptions(select);
     return select;
   }
 
   function renderSortSelectOptions(select = document.getElementById("glad-ah-sort-field")) {
     if (!select) return;
 
-    select.replaceChildren();
-    for (const [group, options] of groupSortOptions()) {
-      const container = document.createElement("optgroup");
-      container.label = group;
-
-      options.forEach((option) => {
-        const optionEl = document.createElement("option");
-        optionEl.value = option.id;
-        optionEl.textContent = option.label;
-        container.append(optionEl);
-      });
-
-      select.append(container);
-    }
+    const optgroups = Array.from(groupSortOptions()).map(([group, options]) => {
+      return h("optgroup", { label: group },
+        ...options.map(option => h("option", { value: option.id }, option.label))
+      );
+    });
+    
+    select.replaceChildren(...optgroups);
     select.value = selectedSort;
   }
 
@@ -650,8 +659,7 @@
   }
 
   function makeFilterControls() {
-    const controls = document.createElement("span");
-    controls.id = "glad-ah-filter-controls";
+    const controls = h("span", { id: "glad-ah-filter-controls" });
     renderFilterControls(controls);
     return controls;
   }
@@ -662,38 +670,31 @@
     const view = getCurrentView();
     const filterValues = getFilterValues(view.id);
     const controls = MODEL.getFilterControlDescriptors(view.id, filterValues);
-    container.replaceChildren();
 
-    if (!controls.length) return;
-
-    const title = document.createElement("span");
-    title.className = "glad-ah-filter-title";
-    title.textContent = "Filters";
-    container.append(title);
-
-    for (const filter of controls) {
-      const label = document.createElement("label");
-      label.className = "glad-ah-filter-control";
-
-      const text = document.createElement("span");
-      text.textContent = filter.label;
-
-      const input = document.createElement("input");
-      input.type = filter.type;
-      input.min = String(filter.min);
-      input.step = String(filter.step);
-      input.dataset.viewId = view.id;
-      input.dataset.filterId = filter.id;
-      input.value = filter.value;
-      input.addEventListener("input", () => {
-        setFilterValue(view.id, filter.id, input.value);
-        saveSharedFilterValues().catch(() => {});
-        sortItems();
-      });
-
-      label.append(text, input);
-      container.append(label);
+    if (!controls.length) {
+      container.replaceChildren();
+      return;
     }
+
+    const title = h("span", { className: "glad-ah-filter-title" }, "Filters");
+    
+    const elements = controls.map(filter => {
+      const input = h("input", {
+        type: filter.type,
+        min: String(filter.min),
+        step: String(filter.step),
+        dataset: { viewId: view.id, filterId: filter.id },
+        value: filter.value,
+        oninput: (e) => {
+          setFilterValue(view.id, filter.id, e.target.value);
+          saveSharedFilterValues().catch(() => {});
+          sortItems();
+        }
+      });
+      return h("label", { className: "glad-ah-filter-control" }, h("span", {}, filter.label), input);
+    });
+
+    container.replaceChildren(title, ...elements);
   }
 
   function updateOrderButton() {
@@ -710,42 +711,36 @@
     const anchor = table || getAuctionFilterForm() || document.querySelector("#content");
     if (!anchor) return;
 
-    const panel = document.createElement("div");
-    panel.id = UI_ID;
-
-    const title = document.createElement("strong");
-    title.style.display = "inline-flex";
-    title.style.alignItems = "center";
-    title.style.gap = "6px";
-    title.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--glad-border-focus);"><path d="m14.5 16 3.5-3.5L14.5 9"/><path d="M9.5 8 6 11.5l3.5 3.5"/><path d="M16 4v16M8 4v16"/></svg> Auction Sorter`;
-
-    const label = document.createElement("label");
-    label.htmlFor = "glad-ah-sort-field";
-    label.textContent = "Sort by";
-
     const select = makeSelect();
     const filterControls = makeFilterControls();
 
-    const orderButton = document.createElement("button");
-    orderButton.type = "button";
-    orderButton.id = "glad-ah-sort-order";
-    orderButton.addEventListener("click", () => {
-      descending = !descending;
-      saveSortState();
-      updateOrderButton();
-      sortItems();
+    const orderButton = h("button", {
+      type: "button",
+      id: "glad-ah-sort-order",
+      onclick: () => {
+        descending = !descending;
+        saveSortState();
+        updateOrderButton();
+        sortItems();
+      }
     });
 
-    const applyButton = document.createElement("button");
-    applyButton.type = "button";
-    applyButton.textContent = "Apply";
-    applyButton.addEventListener("click", sortItems);
+    const applyButton = h("button", { type: "button", onclick: sortItems }, "Apply");
+    const count = h("span", { className: "glad-ah-count" }, `${collectItems().length} items`);
 
-    const count = document.createElement("span");
-    count.className = "glad-ah-count";
-    count.textContent = `${collectItems().length} items`;
+    const panel = h("div", { id: UI_ID },
+      h("strong", { 
+        style: { display: "inline-flex", alignItems: "center", gap: "6px" },
+        html: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--glad-border-focus);"><path d="m14.5 16 3.5-3.5L14.5 9"/><path d="M9.5 8 6 11.5l3.5 3.5"/><path d="M16 4v16M8 4v16"/></svg> Auction Sorter`
+      }),
+      h("label", { htmlFor: "glad-ah-sort-field" }, "Sort by"),
+      select,
+      orderButton,
+      filterControls,
+      applyButton,
+      count
+    );
 
-    panel.append(title, label, select, orderButton, filterControls, applyButton, count);
     insertPanel(panel, table, anchor);
     updateOrderButton();
     sortItems();
