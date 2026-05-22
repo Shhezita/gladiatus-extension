@@ -105,7 +105,8 @@
           options: [
             { value: "damageBonus", label: "Min damage" },
             { value: "blockvalue", label: "Block value" },
-            { value: "hardeningvalue", label: "Hardening value" }
+            { value: "hardeningvalue", label: "Hardening value" },
+            { value: "criticalattackvalue", label: "Critical attack" }
           ],
           defaultStat: "damageBonus"
         })
@@ -255,6 +256,7 @@
       type: filter.type || "number",
       min: filter.min ?? 0,
       step: filter.step ?? 1,
+      options: filter.options || [],
       value: normalizedValues[filter.id] ?? filter.defaultValue ?? 0,
       defaultValue: filter.defaultValue ?? 0
     }));
@@ -265,7 +267,7 @@
     if (!view?.filters.length) return true;
 
     const normalizedValues = normalizeFilterValues(viewId, values);
-    return view.filters.every((filter) => filter.predicate(item, normalizedValues[filter.id]));
+    return view.filters.every((filter) => filter.predicate(item, normalizedValues[filter.id], normalizedValues));
   }
 
   function normalizeCustomDefinitions(definitions) {

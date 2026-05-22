@@ -352,19 +352,7 @@
   }
 
   function saveSortState() {
-    try {
-      const saved = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "null") || {};
-      const byItemType = saved && typeof saved === "object" && saved.byItemType && typeof saved.byItemType === "object"
-        ? saved.byItemType
-        : {};
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        byItemType: {
-          ...byItemType,
-          [getSortContextKey()]: { selectedSort, descending }
-        }
-      }));
-    } catch {
-    }
+    // Disabled per user request to avoid storage lag
   }
 
   function getFilterValues(viewId) {
@@ -399,8 +387,7 @@
   }
 
   async function saveSharedFilterValues() {
-    if (typeof chrome === "undefined" || !chrome.storage?.local) return;
-    await chrome.storage.local.set({ [FILTER_VALUES_STORAGE_KEY]: MODEL.normalizeAllFilterValues(filterValuesByView) });
+    // Disabled per user request to avoid storage lag on every keystroke
   }
 
   function isAuctionPage() {
@@ -434,10 +421,13 @@
     };
   }
 
+  let cachedParsedItems = null;
+
   function collectItems() {
+    if (cachedParsedItems) return cachedParsedItems;
     const seenCells = new Set();
     const meta = getCurrentCategoryMeta();
-    return Array.from(document.querySelectorAll(CARD_SELECTOR))
+    cachedParsedItems = Array.from(document.querySelectorAll(CARD_SELECTOR))
       .map((form, index) => {
         const cell = form.closest("td");
         if (!cell || seenCells.has(cell)) return null;
@@ -461,6 +451,7 @@
         };
       })
       .filter(Boolean);
+    return cachedParsedItems;
   }
 
   function getAuctionId(form, fallbackIndex) {
@@ -542,45 +533,28 @@
       return a.originalIndex - b.originalIndex;
     });
 
-    removeRowsContaining(items.map((item) => item.cell), tbody);
-    appendTwoColumnRows(visibleItems, tbody);
-    appendHiddenStash(hiddenItems, tbody);
+    // Toggle visibility
+    for (const item of visibleItems) {
+      item.cell.style.display = "";
+      item.cell.classList.remove("glad-ah-filtered-hidden");
+    }
+    for (const item of hiddenItems) {
+      item.cell.style.display = "none";
+      item.cell.classList.add("glad-ah-filtered-hidden");
+    }
+    
+    // Sort items in the DOM by reusing existing TR rows (ultra-fast)
+    const allCells = [...visibleItems.map(i => i.cell), ...hiddenItems.map(i => i.cell)];
+    const trs = Array.from(tbody.querySelectorAll("tr"));
+    let cellIndex = 0;
+    for (const tr of trs) {
+      if (cellIndex < allCells.length) tr.append(allCells[cellIndex++]);
+      if (cellIndex < allCells.length) tr.append(allCells[cellIndex++]);
+    }
+
     clearBadges(items);
     updateBadges(visibleItems, option);
     updateItemCount(visibleItems.length, items.length);
-  }
-
-  function removeRowsContaining(cells, tbody) {
-    const cellSet = new Set(cells);
-    Array.from(tbody.rows).forEach((row) => {
-      if (Array.from(row.cells).some((cell) => cellSet.has(cell))) {
-        row.remove();
-      }
-    });
-  }
-
-  function appendTwoColumnRows(items, tbody) {
-    const fragment = document.createDocumentFragment();
-    let row = null;
-    items.forEach((item, index) => {
-      item.cell.classList.remove("glad-ah-filtered-hidden");
-      if (index % 2 === 0) {
-        row = h("tr");
-        fragment.append(row);
-      }
-      row.append(item.cell);
-    });
-    tbody.append(fragment);
-  }
-
-  function appendHiddenStash(items, tbody) {
-    if (!items.length) return;
-
-    items.forEach((item) => {
-      item.cell.classList.add("glad-ah-filtered-hidden");
-    });
-
-    tbody.append(h("tr", { className: "glad-ah-filter-stash" }, ...items.map(item => item.cell)));
   }
 
   function clearBadges(items) {
@@ -691,25 +665,35 @@
       return;
     }
 
-    const title = h("span", { className: "glad-ah-filter-title" }, "Filters");
-    
     const elements = controls.map(filter => {
-      const input = h("input", {
-        type: filter.type,
-        min: String(filter.min),
-        step: String(filter.step),
-        dataset: { viewId: view.id, filterId: filter.id },
-        value: filter.value,
-        oninput: (e) => {
-          setFilterValue(view.id, filter.id, e.target.value);
-          saveSharedFilterValues().catch(() => {});
-          sortItems();
-        }
-      });
-      return h("label", { className: "glad-ah-filter-control" }, h("span", {}, filter.label), input);
+      let input;
+      if (filter.type === "select") {
+        input = h("select", {
+          dataset: { viewId: view.id, filterId: filter.id },
+          onchange: (e) => {
+            setFilterValue(view.id, filter.id, e.target.value);
+            saveSharedFilterValues().catch(() => {});
+            sortItems();
+          }
+        }, ...(filter.options || []).map(opt => h("option", { value: opt.value, selected: String(filter.value) === String(opt.value) }, opt.label)));
+      } else {
+        input = h("input", {
+          type: filter.type,
+          min: String(filter.min),
+          step: String(filter.step),
+          dataset: { viewId: view.id, filterId: filter.id },
+          value: filter.value,
+          oninput: (e) => {
+            setFilterValue(view.id, filter.id, e.target.value);
+            saveSharedFilterValues().catch(() => {});
+            sortItems();
+          }
+        });
+      }
+      return h("label", { className: "glad-ah-filter-control" }, input);
     });
 
-    container.replaceChildren(title, ...elements);
+    container.replaceChildren(...elements);
   }
 
   function updateOrderButton() {
@@ -800,6 +784,7 @@
     if (!signature || signature === lastItemSetSignature) return;
 
     window.clearTimeout(refreshTimer);
+    cachedParsedItems = null; // Clear item cache if DOM actually changed
     refreshTimer = window.setTimeout(sortItems, 150);
   }
 

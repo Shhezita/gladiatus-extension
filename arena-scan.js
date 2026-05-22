@@ -283,30 +283,33 @@
 
       const pseudoRecord = { state: overallState };
 
-      const headerDiv = h("div", { 
-        style: { display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", padding: "2px 0" },
+      const toggleBtn = h("div", { 
+        style: { position: "absolute", top: "2px", right: "2px", cursor: "pointer", zIndex: 10, padding: "4px", display: "flex", alignItems: "center" },
         onclick: toggleCollapse
       }, 
-        h("div", { style: { display: "flex", alignItems: "center", gap: "6px" } },
-          h("strong", { style: { color: "var(--glad-border-focus)", fontSize: "11px", textTransform: "uppercase" }, textContent: "SCANNER" }),
-          h("div", { className: `glad-arena-passive-status-${overallState}`, style: { display: "flex", margin: 0, padding: 0 } }, 
-            h("span", { className: "glad-arena-passive-status-badge", textContent: statusBadgeText(pseudoRecord) })
-          )
-        ),
-        h("span", { style: { color: "var(--glad-text-muted)", fontSize: "10px" }, textContent: "▼" })
+        h("span", { style: { color: "var(--glad-text-muted)", fontSize: "12px", lineHeight: "1" }, textContent: "▼" })
       );
-      panel.replaceChildren(headerDiv);
+
+      const headerDiv = h("div", { 
+        style: { display: "flex", alignItems: "center", gap: "6px", padding: "4px 0 4px 4px", minHeight: "22px" }
+      }, 
+        h("strong", { style: { color: "var(--glad-border-focus)", fontSize: "11px", textTransform: "uppercase" }, textContent: "SCANNER" }),
+        h("div", { className: `glad-arena-passive-status-${overallState}`, style: { display: "flex", margin: 0, padding: 0 } }, 
+          h("span", { className: "glad-arena-passive-status-badge", textContent: statusBadgeText(pseudoRecord) })
+        )
+      );
+      panel.replaceChildren(headerDiv, toggleBtn);
       return;
     }
 
-    const headerDiv = h("div", { 
-      style: { position: "absolute", top: "4px", right: "6px", cursor: "pointer", zIndex: 10 },
+    const toggleBtnUncollapsed = h("div", { 
+      style: { position: "absolute", top: "2px", right: "2px", cursor: "pointer", zIndex: 10, padding: "4px", display: "flex", alignItems: "center" },
       onclick: toggleCollapse
     }, 
-      h("span", { style: { color: "var(--glad-text-muted)", fontSize: "12px", padding: "4px" }, textContent: "▲" })
+      h("span", { style: { color: "var(--glad-text-muted)", fontSize: "12px", lineHeight: "1" }, textContent: "▲" })
     );
 
-    panel.replaceChildren(headerDiv, ...STATUS_KINDS.map((kind) => renderStatusRow(kind, status[kind])));
+    panel.replaceChildren(toggleBtnUncollapsed, ...STATUS_KINDS.map((kind) => renderStatusRow(kind, status[kind])));
   }
 
   function renderStatusRow(kind, record) {
