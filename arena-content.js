@@ -206,7 +206,19 @@
         if (key === "className") el.className = value;
         else if (key === "textContent") el.textContent = value;
         else if (key === "innerHTML") el.innerHTML = value;
-        else if (typeof value === "function") el.addEventListener(key.replace(/^on/, "").toLowerCase(), value);
+        else if (typeof value === "function") {
+          const eventName = key.replace(/^on/, "").toLowerCase();
+          el.addEventListener(eventName, value);
+          if (eventName === "click") {
+            let startY = 0;
+            el.addEventListener("touchstart", (e) => { startY = e.changedTouches[0].screenY; }, { passive: true });
+            el.addEventListener("touchend", (e) => {
+              if (el.disabled || Math.abs(e.changedTouches[0].screenY - startY) > 10) return;
+              e.preventDefault();
+              value(e);
+            });
+          }
+        }
         else if (key === "style" && typeof value === "object") Object.assign(el.style, value);
         else el.setAttribute(key === "htmlFor" ? "for" : key.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`), String(value));
       }

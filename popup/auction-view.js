@@ -28,7 +28,19 @@ function h(tag, props, ...children) {
       if (key === "className") el.className = value;
       else if (key === "dataset") Object.assign(el.dataset, value);
       else if (key === "style" && typeof value === "object") Object.assign(el.style, value);
-      else if (key.startsWith("on") && typeof value === "function") el.addEventListener(key.slice(2).toLowerCase(), value);
+      else if (key.startsWith("on") && typeof value === "function") {
+        const eventName = key.slice(2).toLowerCase();
+        el.addEventListener(eventName, value);
+        if (eventName === "click") {
+          let startY = 0;
+          el.addEventListener("touchstart", (e) => { startY = e.changedTouches[0].screenY; }, { passive: true });
+          el.addEventListener("touchend", (e) => {
+            if (el.disabled || Math.abs(e.changedTouches[0].screenY - startY) > 10) return;
+            e.preventDefault();
+            value(e);
+          });
+        }
+      }
       else if (key === "html") el.innerHTML = value;
       else el[key] = value;
     }
