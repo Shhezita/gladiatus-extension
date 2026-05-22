@@ -238,9 +238,14 @@
     const select = h("select", { id: "glad-arena-formula" });
     renderFormulaOptions(select);
 
+    const selectWrapper = h("div", { className: "glad-select-wrapper" },
+      select,
+      h("span", { className: "glad-select-icon", html: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>` })
+    );
+
     const button = h("button", {
       type: "button",
-      textContent: "Scan scores",
+      innerHTML: `<span class="glad-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></span> <span>Scan scores</span>`,
       onClick: () => {
         runPanelScan(button, select, status).catch((error) => {
           setPanelStatus(status, error.message || String(error), true);
@@ -251,11 +256,15 @@
     const toggleButton = h("button", {
       type: "button",
       className: isAutoScanEnabled ? "glad-arena-button-active" : "",
-      textContent: isAutoScanEnabled ? "Auto: On" : "Auto: Off",
+      innerHTML: isAutoScanEnabled 
+        ? `<span style="color:var(--glad-border-focus)">Auto: On</span>` 
+        : `<span>Auto: Off</span>`,
       style: { marginLeft: "4px" },
       onClick: () => {
         saveAutoScanState(!isAutoScanEnabled).then(() => {
-          toggleButton.textContent = isAutoScanEnabled ? "Auto: On" : "Auto: Off";
+          toggleButton.innerHTML = isAutoScanEnabled 
+            ? `<span style="color:var(--glad-border-focus)">Auto: On</span>` 
+            : `<span>Auto: Off</span>`;
           toggleButton.classList.toggle("glad-arena-button-active", isAutoScanEnabled);
           if (isAutoScanEnabled) runAutoScan(button, select, status).catch(() => {});
         });
@@ -273,7 +282,7 @@
     const panel = h("div", { id: PANEL_ID },
       h("strong", { style: { display: "inline-flex", alignItems: "center", gap: "6px" }, innerHTML: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--glad-border-focus);"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg> Arena Scanner` }),
       h("label", { htmlFor: "glad-arena-formula", textContent: "Formula" }),
-      select,
+      selectWrapper,
       button,
       toggleButton,
       status

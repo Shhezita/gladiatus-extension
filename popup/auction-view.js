@@ -53,7 +53,7 @@ function h(tag, props, ...children) {
   return el;
 }
 
-export function createAuctionView({ render, applyCurrentSortToPage }) {
+export function createAuctionView({ render, applyCurrentSortToPage, showToast }) {
   function renderPageTabs() {
     nodes.pageTabs.hidden = false;
     nodes.pageTabs.replaceChildren(...PAGE_DEFINITIONS.map(page => h("button", {
@@ -547,6 +547,7 @@ export function createAuctionView({ render, applyCurrentSortToPage }) {
       state.editorDraft = { ...cloneDefinition(normalized), isNew: false };
       await persistCustomDefinitions();
       render();
+      if (showToast) showToast("✅ Custom filter saved");
       return true;
     }
 

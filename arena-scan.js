@@ -269,10 +269,16 @@
   }
 
   function renderStatusRow(kind, record) {
+    const isScanning = record.state === "scanning" && record.profileTotal > 0;
+    const progressPercent = isScanning ? Math.min(100, Math.round((record.profileDone / record.profileTotal) * 100)) : 0;
+
     return h("div", { className: `glad-arena-passive-status-row glad-arena-passive-status-${record.state}` },
       h("strong", { textContent: kind === "team" ? "Circus" : "Arena" }),
       h("span", { className: "glad-arena-passive-status-badge", textContent: statusBadgeText(record) }),
-      h("span", { className: "glad-arena-passive-status-message", textContent: statusText(kind, record) })
+      h("span", { className: "glad-arena-passive-status-message", textContent: statusText(kind, record) }),
+      isScanning ? h("div", { className: "glad-arena-progress-container" }, 
+        h("div", { className: "glad-arena-progress-bar", style: { width: `${progressPercent}%` } })
+      ) : null
     );
   }
 

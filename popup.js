@@ -13,7 +13,8 @@ import {
   scanArenaOpponents,
   sendAuctionScanMessage,
   sendTabMessage,
-  setStatus
+  setStatus,
+  showToast
 } from "./popup/runtime.js";
 import {
   FILTER_VALUES_STORAGE_KEY,
@@ -32,8 +33,8 @@ import {
   state
 } from "./popup/store.js";
 
-const auctionView = createAuctionView({ render, applyCurrentSortToPage });
-const arenaView = createArenaView({ render });
+const auctionView = createAuctionView({ render, applyCurrentSortToPage, showToast });
+const arenaView = createArenaView({ render, showToast });
 
 nodes.scanButton.addEventListener("click", onScanButtonClick);
 nodes.pageTabs.addEventListener("click", onPageTabClick);
@@ -172,6 +173,13 @@ async function scanArena() {
 
 function render() {
   configureHeader();
+
+  nodes.results.classList.remove("page-fade-in");
+  nodes.controls.classList.remove("page-fade-in");
+  void nodes.results.offsetWidth;
+  void nodes.controls.offsetWidth;
+  nodes.results.classList.add("page-fade-in");
+  nodes.controls.classList.add("page-fade-in");
 
   if (state.pageMode === "arena") {
     arenaView.renderArenaPage();

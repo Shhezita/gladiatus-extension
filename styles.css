@@ -1,37 +1,49 @@
 :root {
   /* AAA 2026 Code Engine - Semantic Variables (In-Game Injection) */
-  --glad-bg-base: #161412;
-  --glad-bg-surface: #1d1916;
-  --glad-bg-surface-hover: #231b15;
-  --glad-bg-elevated: #2a1f16;
-  --glad-bg-elevated-hover: #33251a;
+  --glad-bg-base: #0f172a;
+  --glad-bg-surface: rgba(30, 41, 59, 0.75);
+  --glad-bg-surface-hover: rgba(51, 65, 85, 0.85);
+  --glad-bg-elevated: rgba(15, 23, 42, 0.8);
+  --glad-bg-elevated-hover: rgba(30, 41, 59, 0.9);
   
-  --glad-border: #4a3822;
-  --glad-border-light: #523a1a;
-  --glad-border-accent: #7b5b32;
-  --glad-border-focus: #a67938;
+  --glad-border: rgba(255, 255, 255, 0.1);
+  --glad-border-light: rgba(255, 255, 255, 0.15);
+  --glad-border-accent: rgba(245, 158, 11, 0.5);
+  --glad-border-focus: #fbbf24;
   
-  --glad-text-main: #f3ddb2;
-  --glad-text-muted: #c8aa74;
-  --glad-text-accent: #ffd98a;
-  --glad-text-highlight: #ffe6ae;
+  --glad-text-main: #f8fafc;
+  --glad-text-muted: #94a3b8;
+  --glad-text-accent: #f59e0b;
+  --glad-text-highlight: #fcd34d;
   
-  --glad-radius-sm: 3px;
-  --glad-radius-md: 4px;
-  --glad-transition-fast: 0.1s ease-in-out;
+  --glad-radius-sm: 6px;
+  --glad-radius-md: 10px;
+  --glad-transition-fast: 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  --glad-shadow-glass: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
+  --glad-backdrop-blur: blur(12px);
+}
+
+/* Base icon alignment */
+.glad-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 #glad-ah-sorter {
   align-items: center;
   background: var(--glad-bg-surface);
+  backdrop-filter: var(--glad-backdrop-blur);
+  -webkit-backdrop-filter: var(--glad-backdrop-blur);
   border: 1px solid var(--glad-border);
   border-radius: var(--glad-radius-md);
+  box-shadow: var(--glad-shadow-glass);
   color: var(--glad-text-main);
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   margin: 10px 0;
-  padding: 8px;
+  padding: 10px 12px;
 }
 
 #glad-ah-sorter strong {
@@ -43,6 +55,30 @@
   color: var(--glad-text-muted);
 }
 
+.glad-select-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.glad-select-wrapper select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 24px !important;
+  z-index: 1;
+}
+.glad-select-icon {
+  position: absolute;
+  right: 6px;
+  pointer-events: none;
+  color: var(--glad-text-muted);
+  transition: color var(--glad-transition-fast);
+  z-index: 2;
+}
+.glad-select-wrapper:hover .glad-select-icon,
+.glad-select-wrapper select:focus + .glad-select-icon {
+  color: var(--glad-border-focus);
+}
+
 #glad-ah-sorter select,
 #glad-ah-sorter input,
 #glad-ah-sorter button {
@@ -51,33 +87,82 @@
   border-radius: var(--glad-radius-sm);
   color: var(--glad-text-highlight);
   font: inherit;
-  min-height: 24px;
-  padding: 2px 7px;
-  transition: background-color var(--glad-transition-fast), border-color var(--glad-transition-fast);
+  font-weight: 500;
+  min-height: 28px;
+  padding: 4px 10px;
+  transition: all var(--glad-transition-fast);
+}
+
+#glad-ah-sorter select:hover {
+  background: var(--glad-bg-elevated-hover);
+  border-color: var(--glad-border-accent);
 }
 
 #glad-ah-sorter select:focus,
 #glad-ah-sorter input:focus {
   border-color: var(--glad-border-focus);
   outline: none;
+  box-shadow: 0 0 0 1px var(--glad-border-focus);
+}
+
+#glad-ah-sorter select optgroup,
+#glad-arena-scanner select optgroup {
+  background-color: var(--glad-bg-base);
+  color: var(--glad-text-accent);
+}
+
+#glad-ah-sorter select option,
+#glad-arena-scanner select option {
+  background-color: var(--glad-bg-base);
+  color: var(--glad-text-main);
 }
 
 #glad-ah-sorter input {
   width: 58px;
 }
 
-#glad-ah-sorter button {
+#glad-ah-sorter input[type="number"]::-webkit-inner-spin-button, 
+#glad-ah-sorter input[type="number"]::-webkit-outer-spin-button,
+#glad-arena-scanner input[type="number"]::-webkit-inner-spin-button, 
+#glad-arena-scanner input[type="number"]::-webkit-outer-spin-button { 
+  opacity: 0.7;
+  filter: invert(0.9) hue-rotate(180deg);
   cursor: pointer;
 }
 
+#glad-ah-sorter button {
+  cursor: pointer;
+  background: linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0) 100%), var(--glad-bg-elevated);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
 #glad-ah-sorter button:hover:not(:disabled) {
-  background: var(--glad-bg-elevated-hover);
+  background: linear-gradient(180deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0) 100%), var(--glad-bg-elevated-hover);
   border-color: var(--glad-border-accent);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+#glad-ah-sorter button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+#glad-ah-sort-order {
+  width: 115px;
+  position: relative;
+}
+
+#glad-ah-sort-order svg {
+  position: absolute;
+  left: 12px;
 }
 
 #glad-ah-sorter button:disabled {
   cursor: default;
-  opacity: 0.55;
+  opacity: 0.5;
 }
 
 #glad-ah-sorter .glad-ah-count {
@@ -112,35 +197,39 @@
 }
 
 .glad-ah-score {
-  background: #140d08;
-  border: 1px solid #b98943;
+  background: rgba(15, 23, 42, 0.9);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  border: 1px solid var(--glad-border-accent);
   border-radius: var(--glad-radius-sm);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
   color: var(--glad-text-accent);
-  font-size: 10px;
-  left: 0;
+  font-size: 11px;
+  font-weight: 700;
+  left: -2px;
   line-height: 1.2;
   max-width: 130px;
   overflow: hidden;
-  padding: 2px 4px;
+  padding: 3px 6px;
   pointer-events: none;
   position: absolute;
   text-overflow: ellipsis;
-  top: 0;
+  top: -2px;
   white-space: nowrap;
   z-index: 20;
 }
 
 .glad-arena-score {
-  background: #1f140a;
-  border: 1px solid #b98943;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid var(--glad-border-accent);
   border-radius: var(--glad-radius-sm);
   color: var(--glad-text-accent);
   display: inline-block;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   line-height: 1.2;
   margin-left: 8px;
-  padding: 2px 5px;
+  padding: 3px 6px;
   white-space: nowrap;
 }
 
@@ -161,14 +250,17 @@ tr.glad-arena-best > td {
 #glad-arena-scanner {
   align-items: center;
   background: var(--glad-bg-surface);
+  backdrop-filter: var(--glad-backdrop-blur);
+  -webkit-backdrop-filter: var(--glad-backdrop-blur);
   border: 1px solid var(--glad-border);
   border-radius: var(--glad-radius-md);
+  box-shadow: var(--glad-shadow-glass);
   color: var(--glad-text-main);
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   margin: 10px 0;
-  padding: 8px;
+  padding: 10px 12px;
 }
 
 #glad-arena-scanner strong {
@@ -187,9 +279,10 @@ tr.glad-arena-best > td {
   border-radius: var(--glad-radius-sm);
   color: var(--glad-text-highlight);
   font: inherit;
-  min-height: 24px;
-  padding: 2px 7px;
-  transition: background-color var(--glad-transition-fast), border-color var(--glad-transition-fast);
+  font-weight: 500;
+  min-height: 28px;
+  padding: 4px 10px;
+  transition: all var(--glad-transition-fast);
 }
 
 #glad-arena-scanner select:focus {
@@ -199,17 +292,28 @@ tr.glad-arena-best > td {
 
 #glad-arena-scanner button {
   cursor: pointer;
+  background: linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0) 100%), var(--glad-bg-elevated);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
 
 #glad-arena-scanner button:hover:not(:disabled) {
-  background: var(--glad-bg-elevated-hover);
+  background: linear-gradient(180deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0) 100%), var(--glad-bg-elevated-hover);
   border-color: var(--glad-border-accent);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+#glad-arena-scanner button:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 #glad-arena-scanner button:disabled,
 #glad-arena-scanner select:disabled {
   cursor: default;
-  opacity: 0.55;
+  opacity: 0.5;
 }
 
 #glad-arena-scanner .glad-arena-status {
@@ -223,14 +327,17 @@ tr.glad-arena-best > td {
 
 #glad-arena-passive-status {
   background: var(--glad-bg-surface);
+  backdrop-filter: var(--glad-backdrop-blur);
+  -webkit-backdrop-filter: var(--glad-backdrop-blur);
   border: 1px solid var(--glad-border);
   border-radius: var(--glad-radius-md);
+  box-shadow: var(--glad-shadow-glass);
   color: var(--glad-text-main);
   display: grid;
   gap: 4px;
   margin: 8px 0;
   max-width: 520px;
-  padding: 7px 8px;
+  padding: 10px 12px;
 }
 
 .glad-arena-passive-status-row {
@@ -246,12 +353,75 @@ tr.glad-arena-best > td {
   grid-row: 1;
 }
 
+/* Custom Checkboxes */
+#glad-ah-sorter input[type="checkbox"],
+#glad-arena-scanner input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  background-color: var(--glad-bg-elevated);
+  border: 1px solid var(--glad-border-light);
+  border-radius: var(--glad-radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--glad-transition-fast);
+  margin: 0;
+  vertical-align: middle;
+  padding: 0;
+}
+
+#glad-ah-sorter input[type="checkbox"]:hover,
+#glad-arena-scanner input[type="checkbox"]:hover {
+  border-color: var(--glad-border-focus);
+}
+
+#glad-ah-sorter input[type="checkbox"]:checked,
+#glad-arena-scanner input[type="checkbox"]:checked {
+  background-color: var(--glad-border-focus);
+  border-color: var(--glad-border-focus);
+}
+
+#glad-ah-sorter input[type="checkbox"]:checked::after,
+#glad-arena-scanner input[type="checkbox"]:checked::after {
+  content: "";
+  width: 4px;
+  height: 8px;
+  border: solid var(--glad-bg-base);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+  margin-bottom: 2px;
+}
+
+/* Progress Bar */
+.glad-arena-progress-container {
+  height: 6px;
+  background: rgba(0,0,0,0.4);
+  border-radius: 3px;
+  overflow: hidden;
+  grid-column: 1 / -1;
+  grid-row: 3;
+  margin-top: 4px;
+  position: relative;
+}
+.glad-arena-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--glad-border-accent), var(--glad-text-accent));
+  width: 0%;
+  transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  border-radius: 3px;
+  box-shadow: 0 0 8px var(--glad-border-focus);
+}
+
 .glad-arena-passive-status-message {
   color: var(--glad-text-muted);
   display: block;
   grid-column: 1 / -1;
   grid-row: 2;
   overflow-wrap: anywhere;
+  font-weight: 500;
 }
 
 .glad-arena-passive-status-badge {

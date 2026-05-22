@@ -621,7 +621,10 @@
       onchange: (e) => applySortSelection(e.target.value)
     });
     renderSortSelectOptions(select);
-    return select;
+    return h("div", { className: "glad-select-wrapper" },
+      select,
+      h("span", { className: "glad-select-icon", html: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>` })
+    );
   }
 
   function renderSortSelectOptions(select = document.getElementById("glad-ah-sort-field")) {
@@ -712,7 +715,10 @@
   function updateOrderButton() {
     const button = document.getElementById("glad-ah-sort-order");
     if (!button) return;
-    button.textContent = descending ? "High first" : "Low first";
+    const icon = descending 
+      ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>`
+      : `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>`;
+    button.innerHTML = `${icon} <span>${descending ? "High first" : "Low first"}</span>`;
     button.disabled = selectedSort === "original";
   }
 
@@ -737,7 +743,7 @@
       }
     });
 
-    //const applyButton = h("button", { type: "button", onclick: sortItems }, "Apply");
+    // const applyButton = h("button", { type: "button", onclick: sortItems }, "Apply");
     const count = h("span", { className: "glad-ah-count" }, `${collectItems().length} items`);
 
     const panel = h("div", { id: UI_ID },
@@ -749,7 +755,6 @@
       select,
       orderButton,
       filterControls,
-     // applyButton,
       count
     );
 

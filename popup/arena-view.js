@@ -13,7 +13,7 @@ import {
   validateArenaFormula
 } from "./store.js";
 
-export function createArenaView({ render }) {
+export function createArenaView({ render, showToast }) {
   function renderArenaPage() {
     renderArenaPageTabs();
     nodes.tabs.hidden = true;
@@ -507,6 +507,7 @@ export function createArenaView({ render }) {
       await persistArenaFormulas();
       await saveStorage(POPUP_STATE_KEY, state.popupState);
       render();
+      if (showToast) showToast("✅ Arena formula saved");
       return true;
     }
 
