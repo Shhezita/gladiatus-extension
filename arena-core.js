@@ -245,9 +245,11 @@
     };
   }
 
+  const sharedParser = typeof DOMParser !== "undefined" ? new DOMParser() : null;
+
   function parseCharacterFromHtml(html, meta = {}) {
-    const parser = new DOMParser();
-    return parseCharacterFromDocument(parser.parseFromString(String(html || ""), "text/html"), meta);
+    if (!sharedParser) return new ArenaCharacter(meta);
+    return parseCharacterFromDocument(sharedParser.parseFromString(String(html || ""), "text/html"), meta);
   }
 
   function parseCharacterFromDocument(doc, meta = {}) {
@@ -308,8 +310,8 @@
   }
 
   function readProfileDollTabsFromHtml(html, baseUrl = "") {
-    const parser = new DOMParser();
-    return readProfileDollTabsFromDocument(parser.parseFromString(String(html || ""), "text/html"), baseUrl);
+    if (!sharedParser) return [];
+    return readProfileDollTabsFromDocument(sharedParser.parseFromString(String(html || ""), "text/html"), baseUrl);
   }
 
   function readProfileDollTabsFromDocument(doc, baseUrl = "") {
@@ -420,8 +422,8 @@
   }
 
   function readArenaOpponentEntriesFromHtml(html, baseUrl = "") {
-    const parser = new DOMParser();
-    return readArenaOpponentEntries(parser.parseFromString(String(html || ""), "text/html"), baseUrl);
+    if (!sharedParser) return [];
+    return readArenaOpponentEntries(sharedParser.parseFromString(String(html || ""), "text/html"), baseUrl);
   }
 
   function readOpponentFromRow(row, link, attack, rowIndex, doc = document, baseUrl = "") {

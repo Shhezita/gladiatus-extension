@@ -398,17 +398,19 @@
       return await loadDocumentViaFrame(url);
     }
   }
-
   function delay(milliseconds) {
     return new Promise((resolve) => setTimeout(resolve, milliseconds));
   }
+
+  const sharedParser = typeof DOMParser !== "undefined" ? new DOMParser() : null;
 
   async function fetchDocument(url, options) {
     let lastStatus = 0;
     for (let attempt = 0; attempt < 4; attempt += 1) {
       const response = await fetch(url, options);
       if (response.ok) {
-        return new DOMParser().parseFromString(await response.text(), "text/html");
+        if (!sharedParser) throw new Error("DOMParser is not available.");
+        return sharedParser.parseFromString(await response.text(), "text/html");
       }
 
       lastStatus = response.status;
@@ -498,7 +500,8 @@
       throw new Error("Could not read the loaded auction document.");
     }
 
-    return new DOMParser().parseFromString(doc.documentElement.outerHTML, "text/html");
+    if (!sharedParser) throw new Error("DOMParser is not available.");
+    return sharedParser.parseFromString(doc.documentElement.outerHTML, "text/html");
   }
 
   function cleanupFrame(iframe, form) {
@@ -511,6 +514,8 @@
       ? SCHEMA.getScanCategory(meta.categoryId)
       : SCHEMA.getCategoryForItemType(meta.itemType, meta.ttype);
     const itemType = String(meta.itemType || category?.itemType || "");
+
+
 
     return {
       categoryId: String(meta.categoryId || category?.id || ""),
